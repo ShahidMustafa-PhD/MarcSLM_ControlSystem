@@ -1,7 +1,7 @@
 # Visual Studio files
 .vs/
 *.VC.db
-*.VC.VC.opendb
+*.VC.opendb
 *.user
 *.suo
 
@@ -27,6 +27,5 @@ Makefile
 # Logs and temp files
 *.log
 *.tmp
-*.md
 Thumbs.db
 .DS_Store
