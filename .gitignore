@@ -17,7 +17,7 @@ CMakeFiles/
 CMakeCache.txt
 cmake_install.cmake
 Makefile
-
+install/
 # Qt / IDE files
 *.pro.user
 .moc/
