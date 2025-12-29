@@ -1,0 +1,17 @@
+{
+    "build": {
+        "layersCompleted": 0,
+        "status": "Setup",
+        "totalLayers": 0
+    },
+    "files": {
+        "jsonFile": "Config/marc_build_styles.json",
+        "marcFile": "Data/slicefile.marc"
+    },
+    "project": {
+        "created": "2025-12-20T12:12:14",
+        "modified": "2025-12-20T12:12:14",
+        "name": "Untitled_Build",
+        "version": "1.0"
+    }
+}

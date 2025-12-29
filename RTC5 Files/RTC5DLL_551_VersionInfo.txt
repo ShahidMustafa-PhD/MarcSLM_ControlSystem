@@ -1,0 +1,44 @@
+SCANLAB version information for the RTC5 DLL
+--------------------------------------------
+SCANLAB Versionsinfo zur RTC5 DLL
+
+***************************************************************************
+
+The DLL file RTC5DLL.dll of version 551 can only be combined with the 
+following program files:
+
+ - RTC5OUT.out (DSP program file)      at least version 553
+ - RTC5RBF.rbf (firmware file)         at least version 524
+ - RTC5DAT.dat (binary support file)   at least version 500
+
+
+Further instructions for using the RTC5 DLL are given in the RTC5 manual.
+
+-------------------------------------------------------------------------
+
+Die DLL-Datei RTC5DLL.dll der Version 551 kann nur mit den
+folgenden Programmdateien kombiniert werden:
+
+ - RTC5OUT.out (DSP-Programmdatei)     mindestens Version 553
+ - RTC5RBF.rbf (Firmwaredatei)         mindestens Version 524
+ - RTC5DAT.dat (binäre Hilfsdatei)     mindestens Version 500
+
+
+Weitere Informationen zur RTC5 DLL finden Sie im RTC5-Handbuch.
+
+***************************************************************************
+
+Manufacturer / Hersteller
+
+   SCANLAB GmbH
+   Siemensstr. 2a 
+   82178 Puchheim
+   Germany
+
+   Tel. + 49 (89) 800 746-0
+   Fax: + 49 (89) 800 746-199
+
+   info@scanlab.de
+   www.scanlab.de
+
+***************************************************************************

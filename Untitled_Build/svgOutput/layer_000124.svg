@@ -1,0 +1,25 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" version="1.1" width="1200" height="1200">
+  <g fill="none" stroke-linecap="round" stroke-linejoin="round">
+  <text x="10" y="20" font-size="24" fill="#555">Layer 124 Z=36.700 mm</text>
+  <g transform="translate(463.401,-420.564)">
+    <g stroke="#2E7D32" stroke-width="0.4">
+    </g>
+    <g stroke="#1976D2" stroke-width="0.4">
+      <polyline points="138.238,1022.054 138.239,1021.917 138.358,1021.917 138.324,1021.362 138.213,1021.012 137.551,1020.172 137.336,1019.916 137.028,1019.661 136.206,1019.050 135.715,1018.829 135.576,1018.976 135.441,1019.005 135.218,1019.143 134.839,1019.428 137.710,1022.299 138.238,1022.054" fill="none"/>
+      <polyline points="135.769,1019.208 135.821,1019.546 135.887,1019.592 136.599,1020.207 136.835,1020.421 137.010,1020.613 137.939,1021.658" fill="none"/>
+    </g>
+    <g stroke="#C62828" stroke-width="0.4" fill="none">
+    </g>
+    <g stroke="#EF6C00" stroke-width="0.4" fill="none">
+    </g>
+  </g>
+  <g stroke="#000000" stroke-width="0.4">
+    <line x1="300.000" y1="600.000" x2="900.000" y2="600.000"/>
+  </g>
+  <g stroke="#000000" stroke-width="0.4">
+    <line x1="600.000" y1="300.000" x2="600.000" y2="900.000"/>
+  </g>
+  <circle cx="600.000" cy="600.000" r="600.000" stroke="red" stroke-width="1" fill="none"/>
+  </g>
+</svg>

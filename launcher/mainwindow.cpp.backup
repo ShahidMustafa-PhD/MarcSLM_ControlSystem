@@ -1,0 +1,436 @@
+﻿#include "mainwindow.h"
+#include "controllers/opccontroller.h"
+#include "controllers/scannercontroller.h"
+#include "controllers/processcontroller.h"
+#include "ProjectManager.h"
+
+#include <windows.h>
+#include <QMessageBox>
+#include <QTimerEvent>
+#include <QString>
+#include <QTimer>
+#include <QTextEdit>
+#include <QLCDNumber>
+#include <QDoubleSpinBox>
+#include <QPushButton>
+#include <QGroupBox>
+#include <QVBoxLayout>
+#include <QHBoxLayout>
+#include <QGridLayout>
+#include <QLabel>
+#include <QWidget>
+#include <QFrame>
+#include <QScreen>
+#include <QGuiApplication>
+#include <QMenuBar>
+#include <QMenu>
+#include <QAction>
+#include <QStatusBar>
+#include <QFileDialog>
+#include <QTextStream>
+#include <QFile>
+#include <QDockWidget>
+#include <QTreeWidget>
+#include <cmath>
+#include <cstdio>
+#include <cstring>
+
+// ============================================================================
+// MainWindow Implementation
+// ============================================================================
+MainWindow::MainWindow(QWidget* parent)
+    : QMainWindow(parent)
+{
+    // Setup UI first
+    setupUI();
+    
+    // Create controllers AFTER UI (they need textEdit for logging)
+    mOPCController = new OPCController(textEdit, this);
+    mScannerController = new ScannerController(textEdit, this);
+    mProcessController = new ProcessController(
+        mOPCController, mScannerController, textEdit, this);
+    mProjectManager = new ProjectManager(this);
+    
+    // Setup menu bar (uses mProjectManager)
+    setupMenuBar();
+    
+    // Connect controller signals to UI
+    connectControllerSignals();
+
+    // Show welcome message
+    textEdit->append("Initializing MarcSLM Controller!");
+    textEdit->append("→ Use 'Initialize OPC' and 'Initialize Scanner' buttons to begin");
+}
+
+MainWindow::~MainWindow() {
+    // Controllers deleted automatically by Qt parent-child relationship
+}
+
+void MainWindow::connectControllerSignals() {
+    // Connect OPC controller signals
+    connect(mOPCController, &OPCController::dataUpdated,
+            this, &MainWindow::onOPCDataUpdated);
+    connect(mOPCController, &OPCController::connectionLost,
+            this, &MainWindow::onOPCConnectionLost);
+    
+    // Connect Scanner controller signals
+    connect(mScannerController, &ScannerController::layerCompleted,
+            this, &MainWindow::onScannerLayerCompleted);
+    connect(mScannerController, &ScannerController::scannerError,
+            this, [this](UINT errorCode, const QString& message) {
+                scannerStatusDisplay->display(static_cast<int>(errorCode));
+                scannerErrorLabel->setText(message);
+                scannerErrorLabel->setStyleSheet("QLabel { color: #F44336; font-size: 9pt; font-weight: bold; }");
+            });
+    
+    // Connect Process controller signals
+    connect(mProcessController, &ProcessController::stateChanged,
+            this, &MainWindow::onProcessStateChanged);
+    connect(mProcessController, &ProcessController::layerPreparedByPLC,
+            this, [this]() {
+                textEdit->append("✓ Layer prepared by PLC - scanning initiated");
+            });
+}
+
+// =============================
+// Button Click Handlers - Delegate to Controllers
+// =============================
+
+void MainWindow::on_InitOPC_clicked() {
+    if (mOPCController->isInitialized()) {
+        textEdit->append("OPC Server is already initialized");
+        QMessageBox::information(this, "Info", "OPC Server is already running");
+        return;
+    }
+
+    if (mOPCController->initialize()) {
+        // Start process monitoring
+        mProcessController->startProcess();
+        
+        // AUTO-INITIALIZE SCANNER if not already initialized
+        if (!mScannerController->isInitialized()) {
+            textEdit->append("\n=== Auto-initializing Scanner for layer printing ===");
+            on_InitScanner_clicked();
+            
+            if (mScannerController->isInitialized()) {
+                textEdit->append("✓ Scanner auto-initialized successfully");
+                textEdit->append("✓ System ready for layer-by-layer printing");
+            } else {
+                textEdit->append("⚠️ Scanner auto-initialization failed");
+                textEdit->append("⚠️ Please manually click 'Initialize Scanner'");
+                QMessageBox::warning(this, "Scanner Init Warning",
+                    "Scanner auto-initialization failed.\n"
+                    "Please click 'Initialize Scanner' button manually\n"
+                    "before starting the printing process.");
+            }
+        } else {
+            textEdit->append("✓ Scanner already initialized - ready for printing");
+        }
+    } else {
+        QMessageBox::critical(this, "Initialization Failed",
+            "Failed to initialize OPC Server.\n"
+            "Please check that CoDeSys OPC Server is running.");
+    }
+}
+
+void MainWindow::on_InitScanner_clicked() {
+    if (mScannerController->isInitialized()) {
+        textEdit->append("Scanner is already initialized");
+        QMessageBox::information(this, "Info", "Scanner is already running");
+        return;
+    }
+
+    if (mScannerController->initialize()) {
+        // Scanner is initialized with default config in controller
+        textEdit->append("✓ Ready for layer-by-layer printing");
+    } else {
+        QMessageBox::critical(this, "Initialization Failed",
+            "Failed to initialize RTC5 Scanner.\n"
+            "Check that:\n"
+            "- RTC5 card is installed\n"
+            "- RTC5DLL.DLL is present\n"
+            "- Correction files are in working directory");
+    }
+}
+
+void MainWindow::on_StartUP_clicked() {
+    if (!mOPCController->isInitialized()) {
+        QMessageBox::warning(this, "Error", "OPC not initialized");
+        return;
+    }
+
+    // Confirm critical operation
+    QMessageBox::StandardButton reply = QMessageBox::question(this,
+        "Confirm Startup",
+        "This will initialize the machine.\n\n"
+        "Ensure:\n"
+        "- Build chamber is clear\n"
+        "- Powder reservoirs are filled\n"
+        "- All safety covers are closed\n\n"
+        "Proceed with startup?",
+        QMessageBox::Yes | QMessageBox::No);
+
+    if (reply == QMessageBox::Yes) {
+        mOPCController->writeStartUp(true);
+    }
+}
+
+void MainWindow::on_Prep_Powder_Fill_clicked() {
+    if (!mOPCController->isInitialized()) {
+        QMessageBox::warning(this, "Error", "OPC not initialized");
+        return;
+    }
+
+    // Validate parameters
+    const int MIN_DELTA = 10;
+    const int MAX_DELTA = 300;
+    const int MAX_LAYERS = 1000;
+
+    int deltaSourceVal = static_cast<int>(round(deltaSource->value()));
+    int deltaSinkVal = static_cast<int>(round(deltaSink->value()));
+    int layersVal = static_cast<int>(round(noOfStacks->value()));
+
+    if (deltaSourceVal < MIN_DELTA || deltaSourceVal > MAX_DELTA) {
+        QMessageBox::critical(this, "Safety Error",
+            QString("Delta Source must be between %1 and %2 microns").arg(MIN_DELTA).arg(MAX_DELTA));
+        return;
+    }
+
+    if (deltaSinkVal < MIN_DELTA || deltaSinkVal > MAX_DELTA) {
+        QMessageBox::critical(this, "Safety Error",
+            QString("Delta Sink must be between %1 and %2 microns").arg(MIN_DELTA).arg(MAX_DELTA));
+        return;
+    }
+
+    if (layersVal <= 0 || layersVal > MAX_LAYERS) {
+        QMessageBox::critical(this, "Safety Error",
+            QString("Layers must be between 1 and %1").arg(MAX_LAYERS));
+        return;
+    }
+
+    // Confirmation dialog
+    QMessageBox::StandardButton reply = QMessageBox::question(this,
+        "Confirm Operation",
+        QString("Start powder fill with:\n"
+            "Delta Source: %1 microns\n"
+            "Delta Sink: %2 microns\n"
+            "Layers: %3\n\n"
+            "Continue?").arg(deltaSourceVal).arg(deltaSinkVal).arg(layersVal),
+        QMessageBox::Yes | QMessageBox::No);
+
+    if (reply == QMessageBox::Yes) {
+        mOPCController->writePowderFillParameters(layersVal, deltaSourceVal, deltaSinkVal);
+    }
+}
+
+void MainWindow::on_Lay_Surface_clicked() {
+    textEdit->append("Lay Surface (test mode)");
+}
+
+void MainWindow::on_MakeBottomLayers_clicked() {
+    if (!mOPCController->isInitialized()) {
+        QMessageBox::warning(this, "Error", "OPC not initialized");
+        return;
+    }
+
+    int layers = static_cast<int>(round(noOfStacks_BottomLayer->value()));
+    int deltaSourceVal = static_cast<int>(round(deltaSource_BottomLayer->value()));
+    int deltaSinkVal = static_cast<int>(round(deltaSink_BottomLayer->value()));
+
+    if (layers <= 0 || layers > 1000) {
+        QMessageBox::warning(this, "Invalid Input", "Number of layers must be between 1 and 1000");
+        return;
+    }
+
+    mOPCController->writeBottomLayerParameters(layers, deltaSourceVal, deltaSinkVal);
+}
+
+void MainWindow::on_Restart_process_clicked() {
+    if (mProcessController->isRunning()) {
+        textEdit->append("ℹ Process already running");
+    } else if (mOPCController->isInitialized()) {
+        mProcessController->startProcess();
+        textEdit->append("✓ Process monitoring restarted");
+    } else {
+        textEdit->append("✗ Cannot restart - OPC not initialized");
+        QMessageBox::warning(this, "Warning", "Please initialize OPC first");
+    }
+}
+
+void MainWindow::on_EmergencyStop_clicked() {
+    mProcessController->emergencyStop();
+    
+    textEdit->append("🚨 EMERGENCY STOP ACTIVATED!");
+    QMessageBox::warning(this, "Emergency Stop",
+        "All operations stopped!\n"
+        "Check machine state before restarting.");
+    
+    if (statusBar()) {
+        statusBar()->showMessage("EMERGENCY STOP ACTIVATED", 0);  // Persistent
+    }
+}
+
+void MainWindow::on_RunScannerDiagnostics_clicked() {
+    if (!mScannerController->isInitialized()) {
+        QMessageBox::warning(this, "Scanner Not Ready", 
+            "Scanner is not initialized.\nPlease click 'Initialize Scanner' first.");
+        textEdit->append("⚠️ Cannot run diagnostics - scanner not initialized");
+        return;
+    }
+
+    mScannerController->runDiagnostics();
+    
+    // Update status display
+    mScannerController->updateStatusDisplay(scannerStatusDisplay, scannerErrorLabel);
+    
+    QMessageBox::information(this, "Scanner Diagnostics",
+        "Diagnostics completed.\nCheck system log for detailed results.");
+}
+
+// =============================
+// Controller Signal Handlers
+// =============================
+
+void MainWindow::onOPCDataUpdated(const OPCServerManager::OPCData& data) {
+    updateDisplaysFromOPCData(data);
+}
+
+void MainWindow::onOPCConnectionLost() {
+    textEdit->append("⚠️ WARNING: OPC Connection Lost!");
+    QMessageBox::warning(this, "Connection Lost",
+        "OPC Server connection has been lost.\n"
+        "Please check the connection and restart if necessary.");
+}
+
+void MainWindow::onScannerLayerCompleted(int layerNumber) {
+    textEdit->append(QString("✓ Scanner completed layer %1").arg(layerNumber));
+    
+    // Update scanner status display
+    mScannerController->updateStatusDisplay(scannerStatusDisplay, scannerErrorLabel);
+}
+
+void MainWindow::onProcessStateChanged(int state) {
+    // Process state changes handled by ProcessController
+    // UI can react to state changes here if needed
+}
+
+void MainWindow::updateDisplaysFromOPCData(const OPCServerManager::OPCData& data) {
+    // Update UI displays from OPC data
+    sourceCylPos->display(data.sourceCylPosition);
+    sinkCylPos->display(data.sinkCylPosition);
+    g_sourceCylPos->display(data.g_sourceCylPosition);
+    g_sinkCylPos->display(data.g_sinkCylPosition);
+    stacksLeft->display(data.stacksLeft);
+    Ready2Powder->display(data.ready2Powder);
+    StartUpDone->display(data.startUpDone);
+    PowderSurfaceDone_2->display(data.powderSurfaceDone);
+}
+
+// RUN MENU
+void MainWindow::onRunInitialize() {
+    textEdit->append("Run -> Initialize System");
+    
+    // Initialize OPC if not already initialized
+    if (!mOPCController->isInitialized()) {
+        on_InitOPC_clicked();
+    }
+    
+    // Initialize Scanner if not already initialized
+    if (!mScannerController->isInitialized()) {
+        on_InitScanner_clicked();
+    }
+    
+    if (statusBar()) {
+        statusBar()->showMessage("System initialization complete", 3000);
+    }
+}
+
+void MainWindow::onRunStart() {
+    textEdit->append("Run -> Start Process");
+    
+    if (mOPCController->isInitialized()) {
+        mProcessController->startProcess();
+        if (statusBar()) statusBar()->showMessage("Process started", 3000);
+    } else {
+        QMessageBox::warning(this, "Not Ready", "Please initialize OPC first");
+    }
+}
+
+void MainWindow::onRunPause() {
+    textEdit->append("Run -> Pause");
+    
+    if (mProcessController->isRunning()) {
+        mProcessController->pauseProcess();
+        if (statusBar()) statusBar()->showMessage("Process paused", 3000);
+        QMessageBox::information(this, "Paused", "Process has been paused.");
+    } else {
+        textEdit->append("ℹ No active process to pause");
+        if (statusBar()) statusBar()->showMessage("No active process", 3000);
+    }
+}
+
+void MainWindow::onRunStop() {
+    QMessageBox::StandardButton reply = QMessageBox::question(this,
+        "Stop Process",
+        "Stop the current process?\n\n"
+        "This will halt all operations.",
+        QMessageBox::Yes | QMessageBox::No);
+    
+    if (reply == QMessageBox::Yes) {
+        mProcessController->stopProcess();
+        textEdit->append("Run -> Stop - Process stopped");
+        if (statusBar()) statusBar()->showMessage("Process stopped", 3000);
+    }
+}
+
+void MainWindow::onRunEmergencyStop() {
+    on_EmergencyStop_clicked();
+}
+
+// ============================================================================
+// Project Management Slot Implementations
+// ============================================================================
+
+void MainWindow::onProjectOpen() {
+    if (!mProjectManager) {
+        mProjectManager = new ProjectManager(this);
+    }
+    
+    if (mProjectManager->openProjectInteractive()) {
+        if (textEdit) textEdit->append("✓ Project opened successfully");
+        if (statusBar()) statusBar()->showMessage("Project opened", 3000);
+    } else {
+        if (textEdit) textEdit->append("✗ Project open canceled or failed");
+        if (statusBar()) statusBar()->showMessage("Project open canceled/failed", 3000);
+    }
+}
+
+void MainWindow::onProjectAttachMarc() {
+    if (!mProjectManager || !mProjectManager->hasProject()) {
+        QMessageBox::warning(this, "No Project", 
+            "Please open or create a project first before attaching files.");
+        return;
+    }
+    
+    if (mProjectManager->attachMarcInteractive()) {
+        if (textEdit) textEdit->append("✓ MARC file attached successfully");
+        if (statusBar()) statusBar()->showMessage("MARC file attached", 3000);
+    } else {
+        if (textEdit) textEdit->append("✗ MARC file attachment canceled or failed");
+    }
+}
+
+void MainWindow::onProjectAttachJson() {
+    if (!mProjectManager || !mProjectManager->hasProject()) {
+        QMessageBox::warning(this, "No Project", 
+            "Please open or create a project first before attaching files.");
+        return;
+    }
+    
+    if (mProjectManager->attachJsonInteractive()) {
+        if (textEdit) textEdit->append("✓ JSON config attached successfully");
+        if (statusBar()) statusBar()->showMessage("JSON config attached", 3000);
+    } else {
+        if (textEdit) textEdit->append("✗ JSON config attachment canceled or failed");
+    }
+}

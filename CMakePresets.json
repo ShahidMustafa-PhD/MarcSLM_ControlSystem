@@ -1,0 +1,111 @@
+﻿{
+  "version": 3,
+  "cmakeMinimumRequired": {
+    "major": 3,
+    "minor": 21,
+    "patch": 0
+  },
+  "configurePresets": [
+    {
+      "name": "x86-release",
+      "displayName": "x86 Release (Ninja)",
+      "generator": "Ninja",
+      "binaryDir": "${sourceDir}/build-win32",
+      "architecture": {
+        "value": "x86",
+        "strategy": "external"
+      },
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Release",
+        "CMAKE_C_COMPILER": "cl",
+        "CMAKE_CXX_COMPILER": "cl"
+      },
+      "environment": {
+        "VSCMD_ARG_TGT_ARCH": "x86"
+      }
+    },
+    {
+      "name": "x86-debug",
+      "displayName": "x86 Debug (Ninja)",
+      "generator": "Ninja",
+      "binaryDir": "${sourceDir}/build-win32-debug",
+      "architecture": {
+        "value": "x86",
+        "strategy": "external"
+      },
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Debug",
+        "CMAKE_C_COMPILER": "cl",
+        "CMAKE_CXX_COMPILER": "cl"
+      },
+      "environment": {
+        "VSCMD_ARG_TGT_ARCH": "x86"
+      }
+    },
+    {
+      "name": "x64-release",
+      "displayName": "x64 Release (Ninja)",
+      "generator": "Ninja",
+      "binaryDir": "${sourceDir}/build-win64",
+      "architecture": {
+        "value": "x64",
+        "strategy": "external"
+      },
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Release",
+        "CMAKE_C_COMPILER": "cl",
+        "CMAKE_CXX_COMPILER": "cl"
+      },
+      "environment": {
+        "VSCMD_ARG_TGT_ARCH": "x64"
+      }
+    },
+    {
+      "name": "x64-debug",
+      "displayName": "x64 Debug (Ninja)",
+      "generator": "Ninja",
+      "binaryDir": "${sourceDir}/build-win64-debug",
+      "architecture": {
+        "value": "x64",
+        "strategy": "external"
+      },
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Debug",
+        "CMAKE_C_COMPILER": "cl",
+        "CMAKE_CXX_COMPILER": "cl"
+      },
+      "environment": {
+        "VSCMD_ARG_TGT_ARCH": "x64"
+      }
+    },
+    {
+      "name": "win32-windows-vcpkg-shared",
+      "inherits": "x86-release",
+      "displayName": "Win32 (x86) Release - vcpkg shared",
+      "hidden": false
+    }
+  ],
+  "buildPresets": [
+    {
+      "name": "x86-release",
+      "configurePreset": "x86-release"
+    },
+    {
+      "name": "x86-debug",
+      "configurePreset": "x86-debug"
+    },
+    {
+      "name": "x64-release",
+      "configurePreset": "x64-release"
+    },
+    {
+      "name": "x64-debug",
+      "configurePreset": "x64-debug"
+    },
+    {
+      "name": "win32-windows-vcpkg-shared",
+      "configurePreset": "win32-windows-vcpkg-shared"
+    }
+  ],
+  "testPresets": []
+}
