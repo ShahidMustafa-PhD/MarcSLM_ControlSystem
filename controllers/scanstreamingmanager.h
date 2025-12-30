@@ -155,15 +155,18 @@ private:
     std::condition_variable mCvConsumerNotEmpty;  // wake consumer when producer pushes
     std::condition_variable mCvPLCNotified;       // wake consumer when OPC signals "layer prepared"
     std::condition_variable mCvOPCReady;          // wake main thread when OPC initialized
+    std::condition_variable mCvLayerRequested;    // NEW: wake producer when consumer requests next layer
     
     std::deque<std::shared_ptr<marc::RTCCommandBlock>> mQueue;
-    size_t mMaxQueue{4};
+    size_t mMaxQueue{1}; // INDUSTRIAL REFINEMENT: Queue size is 1 for single-piece flow
     
     // ========== CONTROL FLAGS ==========
     std::atomic<bool> mStopRequested{false};
     std::atomic<bool> mPLCPrepared{false};
     std::atomic<bool> mOPCInitialized{false};
     std::atomic<bool> mEmergencyStopFlag{false};
+    std::atomic<bool> mProducerFinished{false};      // NEW: signals producer thread has finished all layers
+    std::atomic<bool> mLayerRequested{false};        // NEW: signals consumer requests next layer
     
     // ========== PROCESS MODE =========
     ProcessMode mProcessMode{ProcessMode::Production};

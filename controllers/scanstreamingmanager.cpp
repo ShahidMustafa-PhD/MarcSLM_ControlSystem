@@ -100,6 +100,8 @@ bool ScanStreamingManager::startProcess(const std::wstring& marcPath, const std:
     mTotalLayers = 0;
     mCurrentLayerNumber = 0;
     mProcessMode = ProcessMode::Production;  // PRODUCTION MODE
+    mProducerFinished = false;
+    mLayerRequested = false;
     
     {
         std::lock_guard<std::mutex> lk(mMutex);
@@ -214,6 +216,8 @@ bool ScanStreamingManager::startTestProcess(float testLayerThickness, size_t tes
     mTotalLayers = testLayerCount;
     mCurrentLayerNumber = 0;
     mProcessMode = ProcessMode::Test;  // TEST MODE
+    mProducerFinished = false;
+    mLayerRequested = false;
     
     {
         std::lock_guard<std::mutex> lk(mMutex);
@@ -296,6 +300,7 @@ void ScanStreamingManager::stopProcess() {
     mCvConsumerNotEmpty.notify_all();
     mCvPLCNotified.notify_all();
     mCvOPCReady.notify_all();
+    mCvLayerRequested.notify_all();
 
     // ========== FIX: Join test producer thread (was detached, caused crash) ==========
     if (mTestProducerThread.joinable()) {
@@ -332,6 +337,7 @@ void ScanStreamingManager::emergencyStop() {
     mCvConsumerNotEmpty.notify_all();
     mCvPLCNotified.notify_all();
     mCvOPCReady.notify_all();
+    mCvLayerRequested.notify_all();
 
     // ========== FIX: Join test producer thread (was detached, caused crash) ==========
     if (mTestProducerThread.joinable()) {
@@ -517,24 +523,42 @@ void ScanStreamingManager::consumerThreadFunc() {
         
         size_t layerNumber = 0;
 
-        while (!mStopRequested) {  // FIX: Check stop flag at loop entry (atomic read)
+        // INDUSTRIAL REFINEMENT: Consumer drives the process by requesting the first layer.
+        {
+            std::lock_guard<std::mutex> lk(mMutex);
+            mLayerRequested = true;
+        }
+        mCvLayerRequested.notify_one();
+
+
+        while (!mStopRequested) {
             std::shared_ptr<marc::RTCCommandBlock> block;
 
             // ====== WAIT FOR PRODUCER TO ENQUEUE A BLOCK ======
             {
                 std::unique_lock<std::mutex> lk(mMutex);
                 mCvConsumerNotEmpty.wait(lk, [this] {
-                    return mStopRequested || !mQueue.empty();  // Check both conditions
+                    return mStopRequested || !mQueue.empty() || mProducerFinished;
                 });
-                if (mStopRequested) break;  // Exit cleanly if stop requested
 
-                // Pop from front of queue
-                if (mQueue.empty()) continue;
+                if (mStopRequested) {
+                    break;
+                }
+
+                if (mQueue.empty()) {
+                    if (mProducerFinished) {
+                        // Producer is done and queue is empty, we can exit.
+                        break;
+                    }
+                    // Spurious wakeup, continue waiting.
+                    continue;
+                }
+                
                 block = mQueue.front();
                 mQueue.pop_front();
                 lk.unlock();
 
-                // Notify producer that queue has space
+                // Notify producer that queue has space (important for single-piece flow)
                 mCvProducerNotFull.notify_one();
             }
 
@@ -554,7 +578,7 @@ void ScanStreamingManager::consumerThreadFunc() {
             // 5. Repeat for next layer
             
             if (mProcessMode == ProcessMode::Production) {
-                // ========== PRODUCTION MODE: Wait for OPC to prepare layer ==========`
+                // ========== PRODUCTION MODE: Wait for OPC to prepare layer ==========`"
                 std::unique_lock<std::mutex> lk(mMutex);
                 
                 ss.str("");
@@ -603,7 +627,7 @@ void ScanStreamingManager::consumerThreadFunc() {
                 ss << "Layer " << layerNumber << ": - Recoater/platform ready, starting laser scan...";
                 emit statusMessage(QString::fromStdString(ss.str()));
             } else {
-                // ========== TEST MODE: No OPC synchronization ==========`
+                // ========== TEST MODE: No OPC synchronization ==========`"
                 ss.str("");
                 ss << "Layer " << layerNumber << " (TEST MODE: no OPC sync, laser OFF)";
                 emit statusMessage(QString::fromStdString(ss.str()));
@@ -687,7 +711,7 @@ void ScanStreamingManager::consumerThreadFunc() {
                         }
                         
                         // Wait for batch to complete
-                        if (!scanner.waitForListCompletion(30000)) {  // 30s timeout per batch
+                        if (!scanner.waitForListCompletion(100000)) {  // 100s timeout per batch
                             ss.str("");
                             ss << "Batch execution timeout at command index " << i;
                             emit error(QString::fromStdString(ss.str()));
@@ -842,63 +866,18 @@ void ScanStreamingManager::consumerThreadFunc() {
                          static_cast<int>(mTotalLayers.load()));
             
             // ========== BIDIRECTIONAL OPC SYNCHRONIZATION: NOTIFY LAYER COMPLETE ========= =
-            //
-            // CRITICAL: Signal OPC that Scanner has finished executing this layer.
-            // This completes the bidirectional handshake loop:
-            //
-            // Full Per-Layer Cycle:
-            // ─────────────────────────────────────────────────────────────────────────
-            // STEP 1: Scanner Requests Layer Creation
-            //   • Consumer calls mOPCManager->writeLayerParameters(layerNumber, deltaValue, deltaValue)
-            //   • OPC writes: Lay_Stacks, Step_Source, Step_Sink, LaySurface=TRUE
-            //   • PLC starts recoater/platform movement
-            //
-            // STEP 2: PLC Signals Layer Ready
-            //   • PLC completes recoater/platform movement
-            //   • PLC sets: LaySurface_Done=TRUE
-            //
-            // STEP 3: ProcessController Detects Layer Ready (Polling)
-            //   • GUI thread polls OPC data every 500ms
-            //   • onOPCDataUpdated() detects LaySurface_Done=TRUE
-            //   • Calls handlePowderSurfaceComplete()
-            //   • Calls ScanStreamingManager::notifyPLCPrepared()
-            //     └─ Sets mPLCPrepared = true
-            //     └─ Notifies mCvPLCNotified condition_variable
-            //
-            // STEP 4: Consumer Executes Layer
-            //   • Consumer thread wakes from condition_variable wait
-            //   • Executes scanner commands (jump/mark)
-            //   • Turns laser OFF
-            //
-            // STEP 5: Scanner Notifies OPC Execution Complete (THIS STEP)
-            //   • Consumer calls notifyLayerExecutionComplete(layerNumber)
-            //   • This calls mOPCManager->writeLayerExecutionComplete(layerNumber)
-            //   • OPC writes: LaySurface=FALSE
-            //   • PLC receives signal: "Scanner finished, ready for next layer"
-            //
-            // STEP 6: Loop Repeats
-            //   • Next layer dequeued
-            //   • Scanner requests next layer creation (back to STEP 1)
-            //
-            // WHY THIS IS CRITICAL:
-            // ─────────────────────────────────────────────────────────────────────────
-            // Without this signal, PLC doesn't know when Scanner finishes.
-            // This can cause:
-            //   • Race conditions (PLC starts next layer while Scanner still working)
-            //   • Timing errors (layer creation out of sync with laser execution)
-            //   • Safety issues (laser still ON when recoater moves)
-            //
-            // Industrial Standard:
-            //   All production SLM systems implement bidirectional handshake.
-            //   OPC → Scanner: "Layer ready"
-            //   Scanner → OPC: "Layer done"
-            //   This ensures perfect synchronization between mechanical (recoater)
-            //   and optical (laser) subsystems.
-            //
             if (mProcessMode == ProcessMode::Production) {
-                // Only notify OPC in production mode (test mode has no PLC sync)
                 notifyLayerExecutionComplete(static_cast<uint32_t>(layerNumber));
             }
+
+            // INDUSTRIAL REFINEMENT: Request the next layer only after the current one is fully processed.
+            {
+                std::lock_guard<std::mutex> lk(mMutex);
+                if (!mProducerFinished) {
+                    mLayerRequested = true;
+                }
+            }
+            mCvLayerRequested.notify_one();
         }
 
         // ============================================================================
@@ -950,13 +929,14 @@ void ScanStreamingManager::consumerThreadFunc() {
 
 void ScanStreamingManager::producerThreadFunc(const std::wstring& marcPath) {
     try {
-        // Open MARC file for streaming (no full load)
         marc::StreamingMarcReader reader(marcPath);
         mTotalLayers = reader.totalLayers();
         
         if (mTotalLayers == 0) {
             emit error("MARC file contains no layers");
-            mStopRequested = true;
+            std::lock_guard<std::mutex> lk(mMutex);
+            mProducerFinished = true;
+            mCvConsumerNotEmpty.notify_one();
             return;
         }
 
@@ -964,9 +944,18 @@ void ScanStreamingManager::producerThreadFunc(const std::wstring& marcPath) {
         ss << "Loading " << mTotalLayers << " layers from file (streaming mode)";
         emit statusMessage(QString::fromStdString(ss.str()));
 
-        // Stream layers one at a time
         while (reader.hasNextLayer() && !mStopRequested) {
-            // Read one layer from file (low memory footprint)
+            {
+                std::unique_lock<std::mutex> lk(mMutex);
+                mCvLayerRequested.wait(lk, [this] {
+                    return mStopRequested || mLayerRequested;
+                });
+
+                if (mStopRequested) break;
+
+                mLayerRequested = false; // Consume the request
+            }
+
             marc::Layer layer;
             try {
                 layer = reader.readNextLayer();
@@ -978,7 +967,6 @@ void ScanStreamingManager::producerThreadFunc(const std::wstring& marcPath) {
                 break;
             }
 
-            // Convert to command block WITH PARAMETER SEGMENTS
             auto block = std::make_shared<marc::RTCCommandBlock>();
             block->layerNumber = layer.layerNumber;
             block->layerHeight = layer.layerHeight;
@@ -995,14 +983,12 @@ void ScanStreamingManager::producerThreadFunc(const std::wstring& marcPath) {
                 break;
             }
 
-            // Enqueue block (bounded queue: wait if full)
             {
                 std::unique_lock<std::mutex> lk(mMutex);
-                // Block producer if queue is full
                 mCvProducerNotFull.wait(lk, [this] {
                     return mStopRequested || mQueue.size() < mMaxQueue;
                 });
-                if (mStopRequested) break;  // FIX: Exit gracefully if stop requested
+                if (mStopRequested) break;
 
                 mQueue.push_back(block);
                 ++mLayersProduced;
@@ -1013,24 +999,33 @@ void ScanStreamingManager::producerThreadFunc(const std::wstring& marcPath) {
                    << block->parameterSegments.size() << " parameter segments";
                 emit statusMessage(QString::fromStdString(ss.str()));
             }
-            // Notify consumer that queue has data
             mCvConsumerNotEmpty.notify_one();
             
             emit progress(static_cast<int>(mLayersProduced.load()), 
                          static_cast<int>(mTotalLayers.load()));
         }
 
+        {
+            std::lock_guard<std::mutex> lk(mMutex);
+            mProducerFinished = true;
+        }
+        mCvConsumerNotEmpty.notify_one(); // Final notification for the consumer to exit
+
         if (!mStopRequested) {
             emit statusMessage("- Producer finished streaming all layers");
         }
     } catch (const std::exception& e) {
-        // FIX: Catch exceptions in producer thread
         std::ostringstream ss;
         ss << "Producer exception: " << e.what();
         emit error(QString::fromStdString(ss.str()));
+        std::lock_guard<std::mutex> lk(mMutex);
+        mProducerFinished = true;
+        mCvConsumerNotEmpty.notify_one();
     } catch (...) {
-        // Catch any unhandled exception
         emit error("Producer: Unknown exception occurred");
+        std::lock_guard<std::mutex> lk(mMutex);
+        mProducerFinished = true;
+        mCvConsumerNotEmpty.notify_one();
     }
 }
 
@@ -1045,55 +1040,103 @@ void ScanStreamingManager::producerTestThreadFunc(float layerThickness, size_t l
            << layerThickness << " mm";
         emit statusMessage(QString::fromStdString(ss.str()));
 
-        // Generate synthetic layers for testing
         for (size_t i = 0; i < layerCount && !mStopRequested; ++i) {
-            // Create a synthetic RTCCommandBlock (no geometry, just marks)
+            {
+                std::unique_lock<std::mutex> lk(mMutex);
+                mCvLayerRequested.wait(lk, [this] {
+                    return mStopRequested || mLayerRequested;
+                });
+
+                if (mStopRequested) break;
+
+                mLayerRequested = false; // Consume the request
+            }
+
             auto block = std::make_shared<marc::RTCCommandBlock>();
             block->layerNumber = i + 1;
             block->layerHeight = static_cast<float>(i) * layerThickness;
             block->layerThickness = layerThickness;
             
-            // Add a simple test pattern: 10mm square
-            // This allows testing without a real MARC file
-            block->hatchCount = 1;
+            block->hatchCount = 4;
             block->polylineCount = 0;
             block->polygonCount = 0;
             
-            // Create a 10mm square test pattern (4 sides, 20 marks total)
-            const long TEST_SIZE = 5000;  // 5mm in bits
+            // 50mm square: half-side = 25mm * 3209 bits/mm = 80125 bits
+            const long HALF_SIDE = 80125;  // 25mm in bits (calibration: 3209 bits/mm)
+            const long STEP = 1000;        // Step size for marking points
             
-            // Side 1: left to right bottom
-            for (int j = -TEST_SIZE; j <= TEST_SIZE; j += 1000) {
+            // Draw square: 4 sides with jump/mark commands
+            // Bottom side: left to right
+            for (long x = -HALF_SIDE; x <= HALF_SIDE; x += STEP) {
                 marc::RTCCommandBlock::Command jump{
                     marc::RTCCommandBlock::Command::Jump,
-                    static_cast<long>(j),
-                    -TEST_SIZE};
+                    x,
+                    -HALF_SIDE};
                 marc::RTCCommandBlock::Command mark{
                     marc::RTCCommandBlock::Command::Mark,
-                    static_cast<long>(j),
-                    static_cast<long>(-TEST_SIZE + 500)};
+                    x,
+                    -HALF_SIDE};
                 block->commands.push_back(jump);
                 block->commands.push_back(mark);
             }
             
-            // Create parameter segment with fixed pilot mode values (do not use getStyle(8))
+            // Right side: bottom to top
+            for (long y = -HALF_SIDE; y <= HALF_SIDE; y += STEP) {
+                marc::RTCCommandBlock::Command jump{
+                    marc::RTCCommandBlock::Command::Jump,
+                    HALF_SIDE,
+                    y};
+                marc::RTCCommandBlock::Command mark{
+                    marc::RTCCommandBlock::Command::Mark,
+                    HALF_SIDE,
+                    y};
+                block->commands.push_back(jump);
+                block->commands.push_back(mark);
+            }
+            
+            // Top side: right to left
+            for (long x = HALF_SIDE; x >= -HALF_SIDE; x -= STEP) {
+                marc::RTCCommandBlock::Command jump{
+                    marc::RTCCommandBlock::Command::Jump,
+                    x,
+                    HALF_SIDE};
+                marc::RTCCommandBlock::Command mark{
+                    marc::RTCCommandBlock::Command::Mark,
+                    x,
+                    HALF_SIDE};
+                block->commands.push_back(jump);
+                block->commands.push_back(mark);
+            }
+            
+            // Left side: top to bottom
+            for (long y = HALF_SIDE; y >= -HALF_SIDE; y -= STEP) {
+                marc::RTCCommandBlock::Command jump{
+                    marc::RTCCommandBlock::Command::Jump,
+                    -HALF_SIDE,
+                    y};
+                marc::RTCCommandBlock::Command mark{
+                    marc::RTCCommandBlock::Command::Mark,
+                    -HALF_SIDE,
+                    y};
+                block->commands.push_back(jump);
+                block->commands.push_back(mark);
+            }
+            
             marc::BuildStyle pilotStyle;
-            pilotStyle.id = 0; // or a special pilot/test id
-            pilotStyle.laserPower = 0.0;      // Pilot mode: laser off
-            pilotStyle.laserSpeed = 200.0;     // Mark speed (mm/s)
-            pilotStyle.jumpSpeed = 1200.0;    // Jump speed (mm/s)
-            pilotStyle.laserMode = 0;         // Default mode
-            pilotStyle.laserFocus = 0.0;      // Default focus
-            // Apply pilot style to the block
+            pilotStyle.id = 0;
+            pilotStyle.laserPower = 0.0;
+            pilotStyle.laserSpeed = 20.0;
+            pilotStyle.jumpSpeed = 1200.0;
+            pilotStyle.laserMode = 0;
+            pilotStyle.laserFocus = 0.0;
             applyBuildStyle(&pilotStyle, *block, 0);
             
-            // Enqueue block (bounded queue: wait if full)
             {
                 std::unique_lock<std::mutex> lk(mMutex);
                 mCvProducerNotFull.wait(lk, [this] {
                     return mStopRequested || mQueue.size() < mMaxQueue;
                 });
-                if (mStopRequested) break;  // FIX: Exit gracefully if stop requested
+                if (mStopRequested) break;
 
                 mQueue.push_back(block);
                 ++mLayersProduced;
@@ -1109,17 +1152,27 @@ void ScanStreamingManager::producerTestThreadFunc(float layerThickness, size_t l
                          static_cast<int>(layerCount));
         }
 
+        {
+            std::lock_guard<std::mutex> lk(mMutex);
+            mProducerFinished = true;
+        }
+        mCvConsumerNotEmpty.notify_one(); // Final notification
+
         if (!mStopRequested) {
             emit statusMessage("- Test producer finished generating all synthetic layers");
         }
     } catch (const std::exception& e) {
-        // FIX: Catch exceptions in test producer thread
         std::ostringstream ss;
         ss << "Test producer exception: " << e.what();
         emit error(QString::fromStdString(ss.str()));
+        std::lock_guard<std::mutex> lk(mMutex);
+        mProducerFinished = true;
+        mCvConsumerNotEmpty.notify_one();
     } catch (...) {
-        // Catch any unhandled exception
         emit error("Test producer: Unknown exception occurred");
+        std::lock_guard<std::mutex> lk(mMutex);
+        mProducerFinished = true;
+        mCvConsumerNotEmpty.notify_one();
     }
 }
 
