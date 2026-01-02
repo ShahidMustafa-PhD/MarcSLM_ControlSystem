@@ -63,8 +63,8 @@ endif()
 # OPC DA library removed - migrated to OPC UA
 
 include_directories(${CMAKE_CURRENT_SOURCE_DIR})
-include_directories(${CMAKE_CURRENT_SOURCE_DIR}/opcserver_lib)
-include_directories(${CMAKE_CURRENT_SOURCE_DIR}/scanner_lib)
+include_directories(${CMAKE_CURRENT_SOURCE_DIR}/opcserver)
+include_directories(${CMAKE_CURRENT_SOURCE_DIR}/scanner)
 
 # Add controllers directory to include path
 include_directories(${CMAKE_CURRENT_SOURCE_DIR}/controllers)
@@ -119,12 +119,12 @@ add_library(MarcControl SHARED
     io/rtccommandblock.h
     
     # OPC UA Library (merged into DLL) - replaces OPC DA
-    opcserver_lib/opcserverua.cpp
-    opcserver_lib/opcserverua.h
+    opcserver/opcserverua.cpp
+    opcserver/opcserverua.h
     
     # Scanner Library (merged into DLL)
-    scanner_lib/Scanner.cpp
-    scanner_lib/Scanner.h
+    scanner/Scanner.cpp
+    scanner/Scanner.h
     ${RTC5_INCLUDE_DIR}/RTC5expl.c
 )
 
@@ -176,8 +176,8 @@ target_link_libraries(MarcControl PRIVATE
 
 target_include_directories(MarcControl PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}
-    ${CMAKE_CURRENT_SOURCE_DIR}/opcserver_lib
-    ${CMAKE_CURRENT_SOURCE_DIR}/scanner_lib
+    ${CMAKE_CURRENT_SOURCE_DIR}/opcserver
+    ${CMAKE_CURRENT_SOURCE_DIR}/scanner
     ${CMAKE_CURRENT_SOURCE_DIR}/controllers
     ${CMAKE_CURRENT_SOURCE_DIR}/io
     ${CMAKE_CURRENT_SOURCE_DIR}/launcher

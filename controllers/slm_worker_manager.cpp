@@ -16,8 +16,8 @@
 
 #include "slm_worker_manager.h"
 #include "controllers/opccontroller.h"
-#include "opcserver_lib/opcserverua.h"
-#include "scanner_lib/Scanner.h"
+#include "opcserver/opcserverua.h"
+#include "scanner/Scanner.h"
 
 #include <QDebug>
 #include <QThread>

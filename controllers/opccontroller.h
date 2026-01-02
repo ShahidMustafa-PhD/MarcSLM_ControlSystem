@@ -2,7 +2,7 @@
 #define OPCCONTROLLER_H
 
 #include <QObject>
-#include "opcserver_lib/opcserverua.h"
+#include "opcserver/opcserverua.h"
 
 class QTextEdit;
 

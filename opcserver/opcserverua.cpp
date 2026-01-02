@@ -2,6 +2,7 @@
 
 #include <QThread>
 #include <cstring>
+#include <chrono>
 
 // ============================================================================
 // OPCServerManagerUA Implementation
@@ -14,9 +15,20 @@ OPCServerManagerUA::OPCServerManagerUA(QObject* parent)
     , mConnectionLost(false)
     , mNamespaceIndex(DEFAULT_NAMESPACE_INDEX)
 {
+    mLayerPrepThread = std::thread(&OPCServerManagerUA::layerPreparationWorker, this);
 }
 
 OPCServerManagerUA::~OPCServerManagerUA() {
+    // Safely stop and join the worker thread before any other cleanup
+    {
+        std::lock_guard<std::mutex> lock(mLayerPrepMutex);
+        mStopWorker = true;
+    }
+    mLayerPrepCv.notify_one();
+    if (mLayerPrepThread.joinable()) {
+        mLayerPrepThread.join();
+    }
+
     // ========== Scoped lock ensures mutex is held during destruction ==========
     std::scoped_lock lock(mStateMutex);
     
@@ -611,9 +623,25 @@ bool OPCServerManagerUA::writeLayerParameters(int layers, int deltaSource, int d
         QThread::msleep(OPERATION_SLEEP_MS);
 
         if (!writeBoolNode(mNode_LaySurface, true)) return false;
+        
+        // Trigger the simulated layer preparation
+        {
+            std::lock_guard<std::mutex> lock(mLayerPrepMutex);
+            mLayerPrepRequested = true;
+        }
+        mLayerPrepCv.notify_one();
+
+        // In a real system, the client would now wait for LaySurface_Done to become true.
+        // Here, we just log that the process has been started. The actual wait happens
+        // in the consumer thread, which polls the value. The worker thread simulates
+        // the server-side change.
+        log("Layer parameters sent to PLC (OPC UA), simulating layer preparation...");
+        
+        // The original implementation had a 400ms sleep here.
+        // We keep it to maintain timing consistency with the original code,
+        // even though the real delay is now handled by the worker thread.
         QThread::msleep(400);
 
-        log("Layer parameters sent to PLC (OPC UA)");
         return true;
     }
     catch (const std::exception& e) {
@@ -831,6 +859,31 @@ void OPCServerManagerUA::handleConnectionLoss(const QString& reason) {
         emit connectionLost();
     }
 }
+
+void OPCServerManagerUA::layerPreparationWorker() {
+    while (!mStopWorker) {
+        std::unique_lock<std::mutex> lock(mLayerPrepMutex);
+        mLayerPrepCv.wait(lock, [this] { return mLayerPrepRequested || mStopWorker; });
+
+        if (mStopWorker) {
+            break;
+        }
+
+        if (mLayerPrepRequested) {
+            log("OPC UA Sim: Layer preparation started (5-second delay)...");
+            std::this_thread::sleep_for(std::chrono::seconds(5));
+            log("OPC UA Sim: Layer preparation finished.");
+
+            // Simulate the server setting LaySurface_Done to true
+            // In a real scenario, we would read this value. Here we just log it.
+            log("OPC UA Sim: Setting LaySurface_Done = TRUE (simulated)");
+
+            mLayerPrepRequested = false;
+        }
+    }
+    log("OPC UA layer preparation worker thread stopped.");
+}
+
 void OPCServerManagerUA::stop() {
     bool wasInitialized = false;
 
@@ -855,6 +908,15 @@ void OPCServerManagerUA::stop() {
         std::scoped_lock lock(mStateMutex);
         mConnectionLost = false;  // intentional shutdown
     }
+
+    // Safely stop the worker thread
+    {
+        std::lock_guard<std::mutex> lock(mLayerPrepMutex);
+        mStopWorker = true;
+    }
+    mLayerPrepCv.notify_one();
+    // Note: We don't join here to avoid blocking if stop() is called from the GUI thread.
+    // The destructor will handle the final join.
 
     log("OPC UA connection stopped successfully");
 }

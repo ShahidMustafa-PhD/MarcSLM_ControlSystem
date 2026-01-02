@@ -7,6 +7,8 @@
 #include <memory>
 #include <atomic>
 #include <mutex>
+#include <thread>
+#include <condition_variable>
 #include <open62541/client.h>
 #include <open62541/client_config_default.h>
 #include <open62541/client_highlevel.h>
@@ -246,6 +248,9 @@ private:
     // ========== Logging Helper ==========
     
     void log(const QString& message);
+
+    // ========== Layer Preparation Simulation ==========
+    void layerPreparationWorker();
     
     // ========== Synchronization & State Management ==========
     
@@ -272,6 +277,13 @@ private:
      * ALWAYS released before Qt signals (logMessage, connectionLost, dataUpdated)
      */
     mutable std::mutex mUaCallMutex;
+
+    // NEW: Mutex and CV for layer preparation simulation
+    std::mutex mLayerPrepMutex;
+    std::condition_variable mLayerPrepCv;
+    std::thread mLayerPrepThread;
+    std::atomic<bool> mStopWorker{false};
+    std::atomic<bool> mLayerPrepRequested{false};
     
     /**
      * Flag indicating connection loss was detected.

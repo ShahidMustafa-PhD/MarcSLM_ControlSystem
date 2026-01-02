@@ -18,6 +18,8 @@ CMakeCache.txt
 cmake_install.cmake
 Makefile
 install/
+Untitled_Build/
+Femure_Build/
 # Qt / IDE files
 *.pro.user
 .moc/

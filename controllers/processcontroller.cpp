@@ -302,6 +302,7 @@ void ProcessController::startProductionSLMProcess(const QString& marcFilePath, c
     // This method returns immediately. Process startup is asynchronous.
     // When OPC is ready, systemReady() signal fires and onSystemReady() is called.
     // GUI remains responsive during this entire process.
+   // startProcess();// added by shahid
 }
 
 void ProcessController::onSystemReady() {
@@ -410,6 +411,15 @@ void ProcessController::onSystemReady() {
 
     if (mScanManager->startProcess(marcPath, configPath)) {
         setState(Running);
+        
+        // ========== CRITICAL FIX: START POLLING TIMER ==========
+        // We must start the timer to poll OPC for LaySurface_Done.
+        // Without this, notifyPLCPrepared() is never called.
+        if (!mTimer.isActive()) {
+            mTimer.start();
+            log("- Polling timer started (500ms interval)");
+        }
+
         log("[STEP 3] - Producer thread started (reading *.marc)");
         log("[STEP 3] - Consumer thread started (owns Scanner, loads config.json)");
         log("");
@@ -598,13 +608,35 @@ void ProcessController::onTimerTick() {
         return;
     }
     
-    // Read OPC data
-    if (!mOPCController->readData()) {
-        log("-- WARNING: OPC read failed");
-        return;
-    }
+    // ========== CRITICAL FIX: USE WORKER THREAD OPC MANAGER ==========
+    // In production mode, the active OPC connection lives in SLMWorkerManager's thread.
+    // mOPCController (GUI thread object) is likely uninitialized in this mode.
+    // We must poll the active manager.
     
-    // Data will be processed in onOPCDataUpdated slot
+    if (mSLMWorkerManager) {
+        OPCServerManagerUA* workerOPC = mSLMWorkerManager->getOPCManager();
+        if (workerOPC && workerOPC->isInitialized()) {
+            OPCServerManagerUA::OPCData data;
+            // Direct read from the worker's manager (thread-safe)
+            if (workerOPC->readData(data)) {
+                // Manually trigger the update logic
+                onOPCDataUpdated(data);
+            } else {
+                // Reduce log spam
+                static int failCount = 0;
+                if (++failCount % 20 == 0) log("-- WARNING: OPC read failed (worker thread)");
+            }
+            return;
+        }
+    }
+
+    // Legacy/Test Mode fallback: use the local OPCController
+    if (mOPCController && mOPCController->isInitialized()) {
+        if (!mOPCController->readData()) {
+            static int failCount = 0;
+            if (++failCount % 20 == 0) log("-- WARNING: OPC read failed (local controller)");
+        }
+    }
 }
 
 void ProcessController::onOPCDataUpdated(const OPCServerManagerUA::OPCData& data) {
@@ -633,7 +665,7 @@ void ProcessController::handlePowderSurfaceComplete() {
     }
     
     // Perform laser scanning if scanner is initialized
-    if (mScannerController && mScannerController->isInitialized()) {
+    /*if (mScannerController && mScannerController->isInitialized()) {
         int layersProcessed = mScannerController->layersProcessed();
         int maxLayers = mScannerController->maxPilotLayers();
         
@@ -652,7 +684,7 @@ void ProcessController::handlePowderSurfaceComplete() {
     } else {
         log("-- Scanner not initialized - skipping laser scan");
         log("Click 'Initialize Scanner' to enable pilot square drawing");
-    }
+    }*/
 }
 
 void ProcessController::onScannerLayerCompleted(int layerNumber) {
