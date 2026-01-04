@@ -4,7 +4,7 @@
 #include <QObject>
 #include <QTimer>
 #include <memory>
-#include "opcserver_lib/opcserverua.h"
+#include "opcserver/opcserverua.h"
 
 class OPCController;
 class ScannerController;

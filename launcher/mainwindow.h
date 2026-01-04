@@ -6,7 +6,7 @@
 #include <QMenu>
 #include <QAction>
 #include "ProjectManager.h"
-#include "opcserver_lib/opcserverua.h"  // Include for OPCServerManagerUA and OPCData type
+#include "opcserver/opcserverua.h"  // Include for OPCServerManagerUA and OPCData type
 #include <QDockWidget>
 #include <QTreeWidget>
 #include "controllers/scanstreamingmanager.h"

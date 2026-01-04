@@ -1,6 +1,6 @@
 ﻿#include "scanstreamingmanager.h"
 #include "io/streamingmarcreader.h"
-#include "opcserver_lib/opcserverua.h"
+#include "opcserver/opcserverua.h"
 #include <sstream>
 #include <iomanip>
 #include <cmath>

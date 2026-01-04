@@ -3,7 +3,7 @@
 #include "scannercontroller.h"
 #include "scanstreamingmanager.h"
 #include "controllers/slm_worker_manager.h"
-#include "opcserver_lib/opcserverua.h"
+#include "opcserver/opcserverua.h"
 #include <QTextEdit>
 #include <QDebug>
 
