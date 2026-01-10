@@ -21,11 +21,17 @@ set(CMAKE_AUTORCC ON)
 
 add_definitions(-DQT_NO_CONCEPTS -D_MBCS -UUNICODE -U_UNICODE)
 
-# Set CMAKE_PREFIX_PATH for vcpkg (x64)
-set(CMAKE_PREFIX_PATH "C:/vcpkg/installed/x64-windows")
+# vcpkg integration:
+# Prefer discovery from the CMAKE_TOOLCHAIN_FILE provided by the build environment.
+# Do not hard-code a machine-specific vcpkg root here.
+# (Visual Studio CMake integration and vcpkg toolchain will populate CMAKE_PREFIX_PATH automatically.)
+if(NOT CMAKE_PREFIX_PATH)
+    set(CMAKE_PREFIX_PATH "C:/vcpkg/installed/x64-windows")
+endif()
 
-# Find Qt6
-find_package(Qt5 REQUIRED COMPONENTS Core Widgets)
+ find_package(Qt5 REQUIRED COMPONENTS Core Widgets Gui)
+ set(_qt_targets Qt5::Core Qt5::Gui Qt5::Widgets)
+
 
 # ---------------------------
 # VERSION CONFIGURATION
@@ -153,26 +159,28 @@ set_target_properties(MarcControl PROPERTIES
 # Find and link nlohmann_json
 find_package(nlohmann_json CONFIG REQUIRED)
 
-# Find and link open62541 (OPC UA library)
-# Use vcpkg x64 installed package; ensure the package matches x64 configuration
-if(CMAKE_SIZEOF_VOID_P EQUAL 8)
-    # Prefer vcpkg installed path for x64
-    set(open62541_DIR "C:/vcpkg/installed/x64-windows/share/open62541" CACHE PATH "Path to open62541Config.cmake")
-    find_package(open62541 CONFIG REQUIRED)
-    message(STATUS "Found open62541: ${open62541_DIR}")
+# Find open62541 (OPC UA library)
+# Prefer discovery from the parent toolchain (e.g., vcpkg toolchain).
+find_package(open62541 CONFIG QUIET)
+if(open62541_FOUND)
+    message(STATUS "Found open62541")
 else()
-   # message(FATAL_ERROR "open62541: x86 build not supported. Install open62541 for x86 or build as x64.")
+    message(WARNING "open62541 package not found; MarcControl will be built without embedded OPC UA server support.")
 endif()
 
 # Link all dependencies to DLL
 target_link_libraries(MarcControl PRIVATE
-    Qt5::Core
-    Qt5::Gui
-    Qt5::Widgets
+    ${_qt_targets}
     ${RTC5_LIBRARY}
     nlohmann_json::nlohmann_json
-    open62541::open62541
 )
+
+if(open62541_FOUND)
+    target_link_libraries(MarcControl PRIVATE open62541::open62541)
+    target_compile_definitions(MarcControl PRIVATE MARCSLM_HAS_OPEN62541=1)
+else()
+    target_compile_definitions(MarcControl PRIVATE MARCSLM_HAS_OPEN62541=0)
+endif()
 
 target_include_directories(MarcControl PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}
@@ -203,8 +211,7 @@ else()
 endif()
 
 target_link_libraries(MarcSLM_Launcher PRIVATE
-    Qt5::Core
-    Qt5::Widgets
+    ${_qt_targets}
 )
 
 target_include_directories(MarcSLM_Launcher PRIVATE
@@ -240,345 +247,29 @@ add_custom_command(TARGET MarcControl POST_BUILD
 )
 
 # ---------------------------
-# POST-BUILD: COPY QT5 DLLs FROM VCPKG
+# POST-BUILD: COPY QT DLLs (optional convenience)
 # ---------------------------
-# Copy Qt5 core DLLs
-add_custom_command(TARGET MarcControl POST_BUILD
-    COMMAND ${CMAKE_COMMAND} -E copy_if_different
-        "C:/vcpkg/installed/x64-windows/bin/Qt5Core.dll"
-        "${INSTALL_DIR}"
-    COMMENT "Copying Qt5Core.dll to install directory"
-)
+# The existing configuration hard-codes a vcpkg path. That breaks when vcpkg is installed elsewhere.
+# If you still want post-build copying, prefer deploying via windeployqt or CMake install rules.
 
-add_custom_command(TARGET MarcControl POST_BUILD
-    COMMAND ${CMAKE_COMMAND} -E copy_if_different
-        "C:/vcpkg/installed/x64-windows/bin/Qt5Gui.dll"
-        "${INSTALL_DIR}"
-    COMMENT "Copying Qt5Gui.dll to install directory"
-)
-
-add_custom_command(TARGET MarcControl POST_BUILD
-    COMMAND ${CMAKE_COMMAND} -E copy_if_different
-        "C:/vcpkg/installed/x64-windows/bin/Qt5Widgets.dll"
-        "${INSTALL_DIR}"
-    COMMENT "Copying Qt5Widgets.dll to install directory"
-)
-
-# Copy Qt5 dependency libraries (ICU, graphics, SSL)
-add_custom_command(TARGET MarcControl POST_BUILD
-    COMMAND ${CMAKE_COMMAND} -E copy_if_different
-        "C:/vcpkg/installed/x64-windows/bin/icudt74.dll"
-        "${INSTALL_DIR}"
-    COMMENT "Copying ICU data library (icudt74.dll)"
-)
-
-add_custom_command(TARGET MarcControl POST_BUILD
-    COMMAND ${CMAKE_COMMAND} -E copy_if_different
-        "C:/vcpkg/installed/x64-windows/bin/icuin74.dll"
-        "${INSTALL_DIR}"
-    COMMENT "Copying ICU internationalization library (icuin74.dll)"
-)
-
-add_custom_command(TARGET MarcControl POST_BUILD
-    COMMAND ${CMAKE_COMMAND} -E copy_if_different
-        "C:/vcpkg/installed/x64-windows/bin/icuio74.dll"
-        "${INSTALL_DIR}"
-    COMMENT "Copying ICU I/O library (icuio74.dll)"
-)
-
-add_custom_command(TARGET MarcControl POST_BUILD
-    COMMAND ${CMAKE_COMMAND} -E copy_if_different
-        "C:/vcpkg/installed/x64-windows/bin/icutu74.dll"
-        "${INSTALL_DIR}"
-    COMMENT "Copying ICU tools library (icutu74.dll)"
-)
-
-add_custom_command(TARGET MarcControl POST_BUILD
-    COMMAND ${CMAKE_COMMAND} -E copy_if_different
-        "C:/vcpkg/installed/x64-windows/bin/icuuc74.dll"
-        "${INSTALL_DIR}"
-    COMMENT "Copying ICU common library (icuuc74.dll)"
-)
-
-add_custom_command(TARGET MarcControl POST_BUILD
-    COMMAND ${CMAKE_COMMAND} -E copy_if_different
-        "C:/vcpkg/installed/x64-windows/bin/freetype.dll"
-        "${INSTALL_DIR}"
-    COMMENT "Copying FreeType font library"
-)
-
-add_custom_command(TARGET MarcControl POST_BUILD
-    COMMAND ${CMAKE_COMMAND} -E copy_if_different
-        "C:/vcpkg/installed/x64-windows/bin/harfbuzz.dll"
-        "${INSTALL_DIR}"
-    COMMENT "Copying HarfBuzz text shaping library"
-)
-
-add_custom_command(TARGET MarcControl POST_BUILD
-    COMMAND ${CMAKE_COMMAND} -E copy_if_different
-        "C:/vcpkg/installed/x64-windows/bin/harfbuzz-subset.dll"
-        "${INSTALL_DIR}"
-    COMMENT "Copying HarfBuzz subset library"
-)
-
-add_custom_command(TARGET MarcControl POST_BUILD
-    COMMAND ${CMAKE_COMMAND} -E copy_if_different
-        "C:/vcpkg/installed/x64-windows/bin/jpeg62.dll"
-        "${INSTALL_DIR}"
-    COMMENT "Copying JPEG library"
-)
-
-add_custom_command(TARGET MarcControl POST_BUILD
-    COMMAND ${CMAKE_COMMAND} -E copy_if_different
-        "C:/vcpkg/installed/x64-windows/bin/libpng16.dll"
-        "${INSTALL_DIR}"
-    COMMENT "Copying PNG library"
-)
-
-add_custom_command(TARGET MarcControl POST_BUILD
-    COMMAND ${CMAKE_COMMAND} -E copy_if_different
-        "C:/vcpkg/installed/x64-windows/bin/zlib1.dll"
-        "${INSTALL_DIR}"
-    COMMENT "Copying ZLIB compression library"
-)
-
-add_custom_command(TARGET MarcControl POST_BUILD
-    COMMAND ${CMAKE_COMMAND} -E copy_if_different
-        "C:/vcpkg/installed/x64-windows/bin/libcrypto-3-x64.dll"
-        "${INSTALL_DIR}"
-    COMMENT "Copying OpenSSL crypto library"
-)
-
-add_custom_command(TARGET MarcControl POST_BUILD
-    COMMAND ${CMAKE_COMMAND} -E copy_if_different
-        "C:/vcpkg/installed/x64-windows/bin/libssl-3-x64.dll"
-        "${INSTALL_DIR}"
-    COMMENT "Copying OpenSSL SSL library"
-)
-
-# Copy additional Qt5 dependency libraries
-add_custom_command(TARGET MarcControl POST_BUILD
-    COMMAND ${CMAKE_COMMAND} -E copy_if_different
-        "C:/vcpkg/installed/x64-windows/bin/pcre2-16.dll"
-        "${INSTALL_DIR}"
-    COMMENT "Copying PCRE2 regular expression library"
-)
-
-add_custom_command(TARGET MarcControl POST_BUILD
-    COMMAND ${CMAKE_COMMAND} -E copy_if_different
-        "C:/vcpkg/installed/x64-windows/bin/double-conversion.dll"
-        "${INSTALL_DIR}"
-    COMMENT "Copying double-conversion library"
-)
-
-add_custom_command(TARGET MarcControl POST_BUILD
-    COMMAND ${CMAKE_COMMAND} -E copy_if_different
-        "C:/vcpkg/installed/x64-windows/bin/bz2.dll"
-        "${INSTALL_DIR}"
-    COMMENT "Copying bzip2 compression library"
-)
-
-add_custom_command(TARGET MarcControl POST_BUILD
-    COMMAND ${CMAKE_COMMAND} -E copy_if_different
-        "C:/vcpkg/installed/x64-windows/bin/brotlidec.dll"
-        "${INSTALL_DIR}"
-    COMMENT "Copying Brotli decompression library"
-)
-
-# Copy open62541 OPC UA library
-add_custom_command(TARGET MarcControl POST_BUILD
-    COMMAND ${CMAKE_COMMAND} -E copy_if_different
-        "C:/vcpkg/installed/x64-windows/bin/open62541.dll"
-        "${INSTALL_DIR}"
-    COMMENT "Copying open62541 OPC UA library"
-)
-
-# Create platforms directory and copy Windows platform plugin
-add_custom_command(TARGET MarcControl POST_BUILD
-    COMMAND ${CMAKE_COMMAND} -E make_directory
-        "${INSTALL_DIR}/platforms"
-    COMMENT "Creating platforms directory for Qt plugins"
-)
-
-add_custom_command(TARGET MarcControl POST_BUILD
-    COMMAND ${CMAKE_COMMAND} -E copy_if_different
-        "C:/vcpkg/installed/x64-windows/plugins/platforms/qwindows.dll"
-        "${INSTALL_DIR}/platforms/"
-    COMMENT "Copying Qt Windows platform plugin to install directory"
-)
-
-add_custom_command(TARGET MarcControl POST_BUILD
-    COMMAND ${CMAKE_COMMAND} -E make_directory
-        "${INSTALL_DIR}/updates"
-    COMMENT "Creating updates directory"
-)
+# Copy open62541 OPC UA library (only if found)
+if(open62541_FOUND)
+    add_custom_command(TARGET MarcControl POST_BUILD
+        COMMAND ${CMAKE_COMMAND} -E copy_if_different
+            "$<TARGET_FILE:open62541::open62541>"
+            "${INSTALL_DIR}"
+        COMMENT "Copying open62541 OPC UA library"
+    )
+endif()
 
 # ---------------------------
-# POST-BUILD: COPY QT5 DLLs FOR LAUNCHER
-# ---------------------------  
-add_custom_command(TARGET MarcSLM_Launcher POST_BUILD
-    COMMAND ${CMAKE_COMMAND} -E copy_if_different
-        "C:/vcpkg/installed/x64-windows/bin/Qt5Core.dll"
-        "${INSTALL_DIR}"
-    COMMENT "Copying Qt5Core.dll for launcher"
-)
+# POST-BUILD: COPY QT DLLs FOR LAUNCHER (optional convenience)
+# ---------------------------
+# (See note above about avoiding hard-coded paths.)
 
-add_custom_command(TARGET MarcSLM_Launcher POST_BUILD
-    COMMAND ${CMAKE_COMMAND} -E copy_if_different
-        "C:/vcpkg/installed/x64-windows/bin/Qt5Gui.dll"
-        "${INSTALL_DIR}"
-    COMMENT "Copying Qt5Gui.dll for launcher"
-)
-
-add_custom_command(TARGET MarcSLM_Launcher POST_BUILD
-    COMMAND ${CMAKE_COMMAND} -E copy_if_different
-        "C:/vcpkg/installed/x64-windows/bin/Qt5Widgets.dll"
-        "${INSTALL_DIR}"
-    COMMENT "Copying Qt5Widgets.dll for launcher"
-)
-
-# Copy Qt5 dependency libraries for launcher
-add_custom_command(TARGET MarcSLM_Launcher POST_BUILD
-    COMMAND ${CMAKE_COMMAND} -E copy_if_different
-        "C:/vcpkg/installed/x64-windows/bin/icudt74.dll"
-        "${INSTALL_DIR}"
-    COMMENT "Copying ICU data library for launcher"
-)
-
-add_custom_command(TARGET MarcSLM_Launcher POST_BUILD
-    COMMAND ${CMAKE_COMMAND} -E copy_if_different
-        "C:/vcpkg/installed/x64-windows/bin/icuin74.dll"
-        "${INSTALL_DIR}"
-    COMMENT "Copying ICU internationalization library for launcher"
-)
-
-add_custom_command(TARGET MarcSLM_Launcher POST_BUILD
-    COMMAND ${CMAKE_COMMAND} -E copy_if_different
-        "C:/vcpkg/installed/x64-windows/bin/icuio74.dll"
-        "${INSTALL_DIR}"
-    COMMENT "Copying ICU I/O library for launcher"
-)
-
-add_custom_command(TARGET MarcSLM_Launcher POST_BUILD
-    COMMAND ${CMAKE_COMMAND} -E copy_if_different
-        "C:/vcpkg/installed/x64-windows/bin/icutu74.dll"
-        "${INSTALL_DIR}"
-    COMMENT "Copying ICU tools library for launcher"
-)
-
-add_custom_command(TARGET MarcSLM_Launcher POST_BUILD
-    COMMAND ${CMAKE_COMMAND} -E copy_if_different
-        "C:/vcpkg/installed/x64-windows/bin/icuuc74.dll"
-        "${INSTALL_DIR}"
-    COMMENT "Copying ICU common library for launcher"
-)
-
-add_custom_command(TARGET MarcSLM_Launcher POST_BUILD
-    COMMAND ${CMAKE_COMMAND} -E copy_if_different
-        "C:/vcpkg/installed/x64-windows/bin/freetype.dll"
-        "${INSTALL_DIR}"
-    COMMENT "Copying FreeType library for launcher"
-)
-
-add_custom_command(TARGET MarcSLM_Launcher POST_BUILD
-    COMMAND ${CMAKE_COMMAND} -E copy_if_different
-        "C:/vcpkg/installed/x64-windows/bin/harfbuzz.dll"
-        "${INSTALL_DIR}"
-    COMMENT "Copying HarfBuzz library for launcher"
-)
-
-add_custom_command(TARGET MarcSLM_Launcher POST_BUILD
-    COMMAND ${CMAKE_COMMAND} -E copy_if_different
-        "C:/vcpkg/installed/x64-windows/bin/harfbuzz-subset.dll"
-        "${INSTALL_DIR}"
-    COMMENT "Copying HarfBuzz subset library for launcher"
-)
-
-add_custom_command(TARGET MarcSLM_Launcher POST_BUILD
-    COMMAND ${CMAKE_COMMAND} -E copy_if_different
-        "C:/vcpkg/installed/x64-windows/bin/jpeg62.dll"
-        "${INSTALL_DIR}"
-    COMMENT "Copying JPEG library for launcher"
-)
-
-add_custom_command(TARGET MarcSLM_Launcher POST_BUILD
-    COMMAND ${CMAKE_COMMAND} -E copy_if_different
-        "C:/vcpkg/installed/x64-windows/bin/libpng16.dll"
-        "${INSTALL_DIR}"
-    COMMENT "Copying PNG library for launcher"
-)
-
-add_custom_command(TARGET MarcSLM_Launcher POST_BUILD
-    COMMAND ${CMAKE_COMMAND} -E copy_if_different
-        "C:/vcpkg/installed/x64-windows/bin/zlib1.dll"
-        "${INSTALL_DIR}"
-    COMMENT "Copying ZLIB library for launcher"
-)
-
-add_custom_command(TARGET MarcSLM_Launcher POST_BUILD
-    COMMAND ${CMAKE_COMMAND} -E copy_if_different
-        "C:/vcpkg/installed/x64-windows/bin/libcrypto-3-x64.dll"
-        "${INSTALL_DIR}"
-    COMMENT "Copying OpenSSL crypto library for launcher"
-)
-
-add_custom_command(TARGET MarcSLM_Launcher POST_BUILD
-    COMMAND ${CMAKE_COMMAND} -E copy_if_different
-        "C:/vcpkg/installed/x64-windows/bin/libssl-3-x64.dll"
-        "${INSTALL_DIR}"
-    COMMENT "Copying OpenSSL SSL library for launcher"
-)
-
-# Copy additional Qt5 dependency libraries for launcher
-add_custom_command(TARGET MarcSLM_Launcher POST_BUILD
-    COMMAND ${CMAKE_COMMAND} -E copy_if_different
-        "C:/vcpkg/installed/x64-windows/bin/pcre2-16.dll"
-        "${INSTALL_DIR}"
-    COMMENT "Copying PCRE2 regular expression library for launcher"
-)
-
-add_custom_command(TARGET MarcSLM_Launcher POST_BUILD
-    COMMAND ${CMAKE_COMMAND} -E copy_if_different
-        "C:/vcpkg/installed/x64-windows/bin/double-conversion.dll"
-        "${INSTALL_DIR}"
-    COMMENT "Copying double-conversion library for launcher"
-)
-
-add_custom_command(TARGET MarcSLM_Launcher POST_BUILD
-    COMMAND ${CMAKE_COMMAND} -E copy_if_different
-        "C:/vcpkg/installed/x64-windows/bin/bz2.dll"
-        "${INSTALL_DIR}"
-    COMMENT "Copying bzip2 compression library for launcher"
-)
-
-add_custom_command(TARGET MarcSLM_Launcher POST_BUILD
-    COMMAND ${CMAKE_COMMAND} -E copy_if_different
-        "C:/vcpkg/installed/x64-windows/bin/brotlidec.dll"
-        "${INSTALL_DIR}"
-    COMMENT "Copying Brotli decompression library for launcher"
-)
-
-# Copy open62541 OPC UA library for launcher
-add_custom_command(TARGET MarcSLM_Launcher POST_BUILD
-    COMMAND ${CMAKE_COMMAND} -E copy_if_different
-        "C:/vcpkg/installed/x64-windows/bin/open62541.dll"
-        "${INSTALL_DIR}"
-    COMMENT "Copying open62541 OPC UA library for launcher"
-)
-
-# Ensure platforms directory exists for launcher too
-add_custom_command(TARGET MarcSLM_Launcher POST_BUILD
-    COMMAND ${CMAKE_COMMAND} -E make_directory
-        "${INSTALL_DIR}/platforms"
-    COMMENT "Ensuring platforms directory exists for launcher"
-)
-
-message(STATUS "===========================================")
-message(STATUS "===========================================")
-
-# Add OPC UA Simulator as separate target (optional)
-# The simulator is a standalone executable that must run independently
-# It provides the OPC UA server endpoints that the client connects to
+# ---------------------------
+# OPTIONAL: OPC UA Simulator
+# ---------------------------
 add_subdirectory(OPCUASimulator)
 
 message(STATUS "OPCUASimulator added to build")
