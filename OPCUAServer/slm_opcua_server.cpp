@@ -300,14 +300,6 @@ void SlmOpcUaServer::stop()
         
         m_stopRequested.store(true);
         
-        // Notify fail-safe controller
-        m_failSafe->notifyStop();
-        
-        // Wait for the server thread to exit
-        if (m_serverThread.joinable()) {
-            m_serverThread.join();
-        }
-        
         // Disconnect from PLC
         if (m_plcInterface) {
             m_plcInterface->disconnect();
@@ -342,54 +334,360 @@ void SlmOpcUaServer::clearNodeIds()
 {
     log("[NODE] Clearing node IDs");
     
-    // Free string-based NodeIds
-    for (auto& nodeId : m_nodeIds) {
-        if (nodeId.namespaceIndex == 2) {  // Only free our custom namespace IDs
-            UA_NODEID_CLEAR(&nodeId);
+    // Clear allocated NodeIds from m_allocatedNodeIds vector
+    for (UA_NodeId* nodeIdPtr : m_allocatedNodeIds) {
+        if (nodeIdPtr && nodeIdPtr->namespaceIndex == m_nsIndex) {
+            UA_NodeId_clear(nodeIdPtr);
         }
     }
+    m_allocatedNodeIds.clear();
 }
 
 bool SlmOpcUaServer::addVariables()
 {
     log("[VARIABLES] Adding variables to OPC UA server");
     
-    // Example: Add an Integer variable
-    UA_Int32 nsValue = 42;
-    UA_StatusCode status = UA_Server_addVariableNode(m_server,
-        makeStringNodeId(2, "MyIntegerVariable"), // Variable NodeId
-        UA_NODEID_NUMERIC(0,2253),               // Variable BrowseName (Numeric node)
-        UA_NODEID_NUMERIC(0, 2951),              // Variable DataType (Int32)
-        nullptr,                                  // No custom data
-        &nsValue,                                  // Pointer to the variable value
-        nullptr,                                  // No access level
-        nullptr);                                 // No write mask
+    // Initialize default state
+    auto guard = m_stateContainer.lock();
+    PlcState& state = guard.state();
     
-    if (status != UA_STATUSCODE_GOOD) {
-        log("[ERROR] Failed to add variable node: " + 
-            std::string(UA_StatusCode_name(status)));
-        return false;
+    UA_NodeId parent = UA_NODEID_NUMERIC(0, UA_NS0ID_OBJECTSFOLDER);
+    UA_NodeId refType = UA_NODEID_NUMERIC(0, UA_NS0ID_ORGANIZES);
+    UA_NodeId varType = UA_NODEID_NUMERIC(0, UA_NS0ID_BASEDATAVARIABLETYPE);
+    
+    // Helper lambda to add a variable
+    auto addVar = [&](UA_NodeId& outNodeId, const char* name, const UA_DataType* dt, 
+                      const void* value, bool writable) -> bool {
+        UA_VariableAttributes attr = UA_VariableAttributes_default;
+        attr.displayName = UA_LOCALIZEDTEXT_ALLOC("en-US", name);
+        attr.description = UA_LOCALIZEDTEXT_ALLOC("en-US", name);
+        attr.accessLevel = UA_ACCESSLEVELMASK_READ | (writable ? UA_ACCESSLEVELMASK_WRITE : 0);
+        attr.userAccessLevel = attr.accessLevel;
+        UA_Variant_setScalarCopy(&attr.value, value, dt);
+        
+        outNodeId = makeStringNodeId(m_nsIndex, name);
+        UA_NodeId newNodeId;
+        UA_StatusCode st = UA_Server_addVariableNode(
+            m_server, outNodeId, parent, refType,
+            UA_QUALIFIEDNAME(m_nsIndex, const_cast<char*>(name)),
+            varType, attr, nullptr, &newNodeId);
+        
+        UA_Variant_clear(&attr.value);
+        UA_LocalizedText_clear(&attr.displayName);
+        UA_LocalizedText_clear(&attr.description);
+        
+        if (st != UA_STATUSCODE_GOOD) {
+            log("[ERROR] Failed to add variable '" + std::string(name) + "': " + 
+                std::string(UA_StatusCode_name(st)));
+            return false;
+        }
+        
+        // Track for cleanup
+        m_allocatedNodeIds.push_back(&outNodeId);
+        return true;
+    };
+    
+    // Add all variables
+    bool success = true;
+    
+    // MakeSurface
+    success &= addVar(m_nodes.Z_Stacks, "CECC.MaTe_DLMS.MakeSurface.Z_Stacks", 
+                      &UA_TYPES[UA_TYPES_INT32], &state.Z_Stacks, true);
+    success &= addVar(m_nodes.Delta_Source, "CECC.MaTe_DLMS.MakeSurface.Delta_Source",
+                      &UA_TYPES[UA_TYPES_INT32], &state.Delta_Source, true);
+    success &= addVar(m_nodes.Delta_Sink, "CECC.MaTe_DLMS.MakeSurface.Delta_Sink",
+                      &UA_TYPES[UA_TYPES_INT32], &state.Delta_Sink, true);
+    success &= addVar(m_nodes.MakeSurface_Done, "CECC.MaTe_DLMS.MakeSurface.MakeSurface_Done",
+                      &UA_TYPES[UA_TYPES_BOOLEAN], &state.MakeSurface_Done, true);
+    success &= addVar(m_nodes.Marcer_Source_Cylinder_ActualPosition,
+                      "CECC.MaTe_DLMS.MakeSurface.Marcer_Source_Cylinder_ActualPosition",
+                      &UA_TYPES[UA_TYPES_INT32], &state.Marcer_Source_Cylinder_ActualPosition, true);
+    success &= addVar(m_nodes.Marcer_Sink_Cylinder_ActualPosition,
+                      "CECC.MaTe_DLMS.MakeSurface.Marcer_Sink_Cylinder_ActualPosition",
+                      &UA_TYPES[UA_TYPES_INT32], &state.Marcer_Sink_Cylinder_ActualPosition, true);
+    
+    // GVL
+    success &= addVar(m_nodes.StartSurfaces, "CECC.MaTe_DLMS.GVL.StartSurfaces",
+                      &UA_TYPES[UA_TYPES_BOOLEAN], &state.StartSurfaces, true);
+    success &= addVar(m_nodes.g_Marcer_Source_Cylinder_ActualPosition,
+                      "CECC.MaTe_DLMS.GVL.g_Marcer_Source_Cylinder_ActualPosition",
+                      &UA_TYPES[UA_TYPES_INT32], &state.g_Marcer_Source_Cylinder_ActualPosition, true);
+    success &= addVar(m_nodes.g_Marcer_Sink_Cylinder_ActualPosition,
+                      "CECC.MaTe_DLMS.GVL.g_Marcer_Sink_Cylinder_ActualPosition",
+                      &UA_TYPES[UA_TYPES_INT32], &state.g_Marcer_Sink_Cylinder_ActualPosition, true);
+    
+    // Prepare2Process
+    success &= addVar(m_nodes.LaySurface, "CECC.MaTe_DLMS.Prepare2Process.LaySurface",
+                      &UA_TYPES[UA_TYPES_BOOLEAN], &state.LaySurface, true);
+    success &= addVar(m_nodes.LaySurface_Done, "CECC.MaTe_DLMS.Prepare2Process.LaySurface_Done",
+                      &UA_TYPES[UA_TYPES_BOOLEAN], &state.LaySurface_Done, true);
+    success &= addVar(m_nodes.Step_Sink, "CECC.MaTe_DLMS.Prepare2Process.Step_Sink",
+                      &UA_TYPES[UA_TYPES_INT32], &state.Step_Sink, true);
+    success &= addVar(m_nodes.Step_Source, "CECC.MaTe_DLMS.Prepare2Process.Step_Source",
+                      &UA_TYPES[UA_TYPES_INT32], &state.Step_Source, true);
+    success &= addVar(m_nodes.Lay_Stacks, "CECC.MaTe_DLMS.Prepare2Process.Lay_Stacks",
+                      &UA_TYPES[UA_TYPES_INT32], &state.Lay_Stacks, true);
+    
+    // StartUpSequence
+    success &= addVar(m_nodes.StartUp, "CECC.MaTe_DLMS.StartUpSequence.StartUp",
+                      &UA_TYPES[UA_TYPES_BOOLEAN], &state.StartUp, true);
+    success &= addVar(m_nodes.StartUp_Done, "CECC.MaTe_DLMS.StartUpSequence.StartUp_Done",
+                      &UA_TYPES[UA_TYPES_BOOLEAN], &state.StartUp_Done, true);
+    
+    if (success) {
+        log("[VARIABLES] All variables added successfully (17 total)");
+    } else {
+        log("[ERROR] Some variables failed to add");
     }
     
-    log("[VARIABLES] Variable added successfully");
-    return true;
+    return success;
 }
 
 void SlmOpcUaServer::iterate()
 {
-    // Perform cyclic tasks, e.g. updating variable values, handling client requests, etc.
+    if (!m_server) {
+        return;
+    }
     
-    // Example: Update the integer variable value
-    static int cycleCounter = 0;
-    cycleCounter++;
+    std::lock_guard<std::mutex> lock(m_serverMutex);
     
-    UA_Int32 nsValue = cycleCounter;
-    UA_Server_writeValue ?_server,                    // Server handle
-        makeStringNodeId(2, "MyIntegerVariable"),     // Variable NodeId
-        &nsValue                                  // Pointer to the new value
-    );
+    // Process OPC UA messages
+    UA_Server_run_iterate(m_server, false);
     
-    // TODO: Read/write PLC variables, handle state machine, etc.
+    // Sync variables to state
+    syncVariablesToState();
+    
+    // Apply PLC behavior (simulation or production)
+    applyPlcBehavior();
+    
+    // Sync state back to variables
+    syncStateToVariables();
+    
+    // Feed watchdog
+    if (m_config.enableFailSafe) {
+        m_failSafe->feedWatchdog();
+    }
+}
+
+// ============================================================================
+// OPC UA Variable Access
+// ============================================================================
+
+void SlmOpcUaServer::writeVar(const UA_NodeId& nodeId, const void* value, const UA_DataType* type)
+{
+    if (!m_server) {
+        return;
+    }
+    
+    UA_Variant variant;
+    UA_Variant_init(&variant);
+    UA_Variant_setScalarCopy(&variant, value, type);
+    UA_Server_writeValue(m_server, nodeId, variant);
+    UA_Variant_clear(&variant);
+}
+
+void SlmOpcUaServer::readVar(const UA_NodeId& nodeId, void* value, const UA_DataType* type)
+{
+    if (!m_server) {
+        return;
+    }
+    
+    UA_Variant variant;
+    UA_Variant_init(&variant);
+    UA_Server_readValue(m_server, nodeId, &variant);
+    
+    if (UA_Variant_hasScalarType(&variant, type) && variant.data) {
+        std::memcpy(value, variant.data, type->memSize);
+    }
+    
+    UA_Variant_clear(&variant);
+}
+
+void SlmOpcUaServer::syncStateToVariables()
+{
+    auto guard = m_stateContainer.lock();
+    const PlcState& state = guard.state();
+    
+    // Write all state values to OPC UA variables
+    writeVar(m_nodes.Z_Stacks, &state.Z_Stacks, &UA_TYPES[UA_TYPES_INT32]);
+    writeVar(m_nodes.Delta_Source, &state.Delta_Source, &UA_TYPES[UA_TYPES_INT32]);
+    writeVar(m_nodes.Delta_Sink, &state.Delta_Sink, &UA_TYPES[UA_TYPES_INT32]);
+    writeVar(m_nodes.MakeSurface_Done, &state.MakeSurface_Done, &UA_TYPES[UA_TYPES_BOOLEAN]);
+    writeVar(m_nodes.Marcer_Source_Cylinder_ActualPosition, 
+             &state.Marcer_Source_Cylinder_ActualPosition, &UA_TYPES[UA_TYPES_INT32]);
+    writeVar(m_nodes.Marcer_Sink_Cylinder_ActualPosition,
+             &state.Marcer_Sink_Cylinder_ActualPosition, &UA_TYPES[UA_TYPES_INT32]);
+    
+    writeVar(m_nodes.StartSurfaces, &state.StartSurfaces, &UA_TYPES[UA_TYPES_BOOLEAN]);
+    writeVar(m_nodes.g_Marcer_Source_Cylinder_ActualPosition,
+             &state.g_Marcer_Source_Cylinder_ActualPosition, &UA_TYPES[UA_TYPES_INT32]);
+    writeVar(m_nodes.g_Marcer_Sink_Cylinder_ActualPosition,
+             &state.g_Marcer_Sink_Cylinder_ActualPosition, &UA_TYPES[UA_TYPES_INT32]);
+    
+    writeVar(m_nodes.LaySurface, &state.LaySurface, &UA_TYPES[UA_TYPES_BOOLEAN]);
+    writeVar(m_nodes.LaySurface_Done, &state.LaySurface_Done, &UA_TYPES[UA_TYPES_BOOLEAN]);
+    writeVar(m_nodes.Step_Sink, &state.Step_Sink, &UA_TYPES[UA_TYPES_INT32]);
+    writeVar(m_nodes.Step_Source, &state.Step_Source, &UA_TYPES[UA_TYPES_INT32]);
+    writeVar(m_nodes.Lay_Stacks, &state.Lay_Stacks, &UA_TYPES[UA_TYPES_INT32]);
+    
+    writeVar(m_nodes.StartUp, &state.StartUp, &UA_TYPES[UA_TYPES_BOOLEAN]);
+    writeVar(m_nodes.StartUp_Done, &state.StartUp_Done, &UA_TYPES[UA_TYPES_BOOLEAN]);
+}
+
+void SlmOpcUaServer::syncVariablesToState()
+{
+    auto guard = m_stateContainer.lock();
+    PlcState& state = guard.state();
+    
+    // Read all values from OPC UA variables to state
+    readVar(m_nodes.StartUp, &state.StartUp, &UA_TYPES[UA_TYPES_BOOLEAN]);
+    readVar(m_nodes.StartSurfaces, &state.StartSurfaces, &UA_TYPES[UA_TYPES_BOOLEAN]);
+    readVar(m_nodes.LaySurface, &state.LaySurface, &UA_TYPES[UA_TYPES_BOOLEAN]);
+    readVar(m_nodes.Z_Stacks, &state.Z_Stacks, &UA_TYPES[UA_TYPES_INT32]);
+    readVar(m_nodes.Delta_Source, &state.Delta_Source, &UA_TYPES[UA_TYPES_INT32]);
+    readVar(m_nodes.Delta_Sink, &state.Delta_Sink, &UA_TYPES[UA_TYPES_INT32]);
+    readVar(m_nodes.Step_Source, &state.Step_Source, &UA_TYPES[UA_TYPES_INT32]);
+    readVar(m_nodes.Step_Sink, &state.Step_Sink, &UA_TYPES[UA_TYPES_INT32]);
+    readVar(m_nodes.Lay_Stacks, &state.Lay_Stacks, &UA_TYPES[UA_TYPES_INT32]);
+}
+
+// ============================================================================
+// PLC Behavior (Simulation or Production)
+// ============================================================================
+
+void SlmOpcUaServer::applyPlcBehavior()
+{
+    auto guard = m_stateContainer.lock();
+    PlcState& state = guard.state();
+    
+    // ========================================================================
+    // PRODUCTION MODE: Real CoDeSys PLC Interface
+    // ========================================================================
+    
+    if (!m_config.simulatePlc && m_plcInterface) {
+        // Check PLC connection
+        if (!m_plcInterface->isConnected()) {
+            static auto lastReconnectAttempt = std::chrono::steady_clock::now();
+            auto now = std::chrono::steady_clock::now();
+            auto elapsed = std::chrono::duration_cast<std::chrono::seconds>(
+                now - lastReconnectAttempt).count();
+            
+            if (elapsed >= 5) {
+                log("[PRODUCTION] Attempting PLC reconnection...");
+                m_plcInterface->reconnect();
+                lastReconnectAttempt = now;
+            }
+            return;
+        }
+        
+        // Read PLC status
+        PlcStatus plcStatus;
+        if (m_plcInterface->readStatus(plcStatus)) {
+            state.Marcer_Source_Cylinder_ActualPosition = plcStatus.sourcePositionActual;
+            state.Marcer_Sink_Cylinder_ActualPosition = plcStatus.sinkPositionActual;
+            state.MakeSurface_Done = plcStatus.powderFillDone;
+            state.LaySurface_Done = plcStatus.layerPrepDone;
+            state.StartUp_Done = plcStatus.startupDone;
+            
+            state.g_Marcer_Source_Cylinder_ActualPosition = plcStatus.sourcePositionActual;
+            state.g_Marcer_Sink_Cylinder_ActualPosition = plcStatus.sinkPositionActual;
+            
+            if (plcStatus.emergencyStopActive && m_config.enableFailSafe) {
+                m_failSafe->triggerEmergencyStop("PLC emergency stop active");
+                state.resetToSafe();
+                return;
+            }
+        }
+        
+        // Process commands
+        if (state.StartUp && !state.StartUp_Done) {
+            log("[PRODUCTION] Startup sequence requested");
+            if (m_plcInterface->startStartupSequence()) {
+                log("[PRODUCTION] ? Startup command sent");
+            }
+        }
+        
+        if (state.StartSurfaces && !state.MakeSurface_Done) {
+            log("[PRODUCTION] Powder fill requested");
+            if (m_plcInterface->startPowderFill(state.Z_Stacks, state.Delta_Source, state.Delta_Sink)) {
+                log("[PRODUCTION] ? Powder fill command sent");
+            }
+        }
+        
+        if (state.LaySurface && !state.PreparingLayer) {
+            log("[PRODUCTION] Layer preparation requested");
+            state.PreparingLayer = UA_TRUE;
+            if (m_plcInterface->startLayerPreparation(state.Step_Source, state.Step_Sink)) {
+                log("[PRODUCTION] ? Layer prep command sent");
+            }
+        }
+        else if (!state.LaySurface && state.PreparingLayer) {
+            log("[PRODUCTION] Layer execution complete");
+            state.PreparingLayer = UA_FALSE;
+            state.LaySurface_Done = UA_FALSE;
+            m_plcInterface->resetCommands();
+        }
+        
+        // Update watchdog
+        if (m_plcInterface->isWatchdogExpired()) {
+            log("[PRODUCTION] ?? PLC WATCHDOG TIMEOUT!");
+            if (m_config.enableFailSafe) {
+                m_failSafe->triggerEmergencyStop("PLC watchdog timeout");
+                state.resetToSafe();
+            }
+        }
+        
+        return;
+    }
+    
+    // ========================================================================
+    // SIMULATION MODE: Internal PLC Emulation
+    // ========================================================================
+    
+    // Startup sequence
+    if (state.StartUp && !state.StartUp_Done) {
+        log("[SIM] Startup sequence initiated");
+        state.StartUp_Done = UA_TRUE;
+        log("[SIM] Startup complete");
+    }
+    
+    // Powder fill
+    if (state.StartSurfaces) {
+        if (!state.MakeSurface_Done) {
+            log("[SIM] Powder fill initiated");
+            for (int i = 0; i < state.Z_Stacks; ++i) {
+                state.Marcer_Source_Cylinder_ActualPosition += state.Delta_Source;
+                state.Marcer_Sink_Cylinder_ActualPosition += state.Delta_Sink;
+            }
+            state.MakeSurface_Done = UA_TRUE;
+            log("[SIM] Powder fill complete");
+        }
+    } else {
+        state.MakeSurface_Done = UA_FALSE;
+    }
+    
+    // Layer preparation
+    if (state.LaySurface && !state.PreparingLayer) {
+        log("[SIM] Layer preparation requested");
+        state.PreparingLayer = UA_TRUE;
+        state.LaySurface_Done = UA_FALSE;
+        
+        state.Marcer_Source_Cylinder_ActualPosition += state.Step_Source;
+        state.Marcer_Sink_Cylinder_ActualPosition += state.Step_Sink;
+        
+        state.LaySurface_Done = UA_TRUE;
+        log("[SIM] Layer prepared");
+    }
+    else if (!state.LaySurface && state.PreparingLayer) {
+        log("[SIM] Layer execution complete");
+        state.PreparingLayer = UA_FALSE;
+        state.LaySurface_Done = UA_FALSE;
+        log("[SIM] Ready for next layer");
+    }
+    
+    // Mirror positions
+    state.g_Marcer_Source_Cylinder_ActualPosition = state.Marcer_Source_Cylinder_ActualPosition;
+    state.g_Marcer_Sink_Cylinder_ActualPosition = state.Marcer_Sink_Cylinder_ActualPosition;
 }
 
 // ============================================================================
@@ -398,18 +696,17 @@ void SlmOpcUaServer::iterate()
 
 void SlmOpcUaServer::log(const std::string& msg)
 {
-    // Prefix with timestamp
     auto now = std::chrono::system_clock::now();
     std::time_t now_c = std::chrono::system_clock::to_time_t(now);
     std::ostringstream oss;
     oss << std::put_time(std::localtime(&now_c), "%F %T")
         << " [OPC_SERVER] " << msg;
     
-    // Print to console
     std::cout << oss.str() << std::endl;
     
-    // TODO: Write to file, send to remote log server, etc.
+    if (m_config.logCallback) {
+        m_config.logCallback(oss.str());
+    }
 }
 
-}
-// End of namespace slm_opcua
+} // namespace slm_opcua
