@@ -274,3 +274,11 @@ add_subdirectory(OPCUASimulator)
 
 message(STATUS "OPCUASimulator added to build")
 message(STATUS "To build the simulator, use OPCUASimulator/CMakeLists.txt")
+
+# ---------------------------
+# OPTIONAL: OPC UA Production Server
+# ---------------------------
+add_subdirectory(OPCUAServer)
+
+message(STATUS "OPCUAServer (Production) added to build")
+message(STATUS "Features: Fail-safe controller, RAII memory management, Industrial SLM control")

@@ -47,6 +47,7 @@ struct BuildStyle {
 
     // Validation
     bool isValid() const;
+    std::string validationError() const;  // NEW: Returns specific reason if invalid
     std::string debugString() const;
 };
 

@@ -1,0 +1,27 @@
+{
+	"backtrace" : 0,
+	"backtraceGraph" : 
+	{
+		"commands" : [],
+		"files" : 
+		[
+			"OPCUASimulator/CMakeLists.txt"
+		],
+		"nodes" : 
+		[
+			{
+				"file" : 0
+			}
+		]
+	},
+	"id" : "OPCUASimulator_autogen_timestamp_deps::@8d4eae62efaed00cf6f1",
+	"isGeneratorProvided" : true,
+	"name" : "OPCUASimulator_autogen_timestamp_deps",
+	"paths" : 
+	{
+		"build" : "OPCUASimulator",
+		"source" : "OPCUASimulator"
+	},
+	"sources" : [],
+	"type" : "UTILITY"
+}

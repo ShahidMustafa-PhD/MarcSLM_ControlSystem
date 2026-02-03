@@ -644,24 +644,47 @@ void ProcessController::onOPCDataUpdated(const OPCServerManagerUA::OPCData& data
         return;
     }
     
-    // Check for powder surface completion
+    // ========== CRITICAL FIX: BIDIRECTIONAL HANDSHAKE ==========
+    //
+    // PROBLEM: mPreviousPowderSurfaceDone stays TRUE after first layer,
+    // causing edge detection to fail for all subsequent layers.
+    //
+    // SOLUTION: Reset flag when LaySurface_Done goes FALSE (simulator reset),
+    // re-enabling edge detection for next layer.
+    //
+    
     bool currentPowderSurfaceDone = (data.powderSurfaceDone != 0);
     
+    // RISING EDGE: LaySurface_Done FALSE → TRUE (layer prepared)
     if (!mPreviousPowderSurfaceDone && currentPowderSurfaceDone) {
+        log(QString("✅ Rising edge detected: LaySurface_Done TRUE (layer %1 ready)")
+            .arg(mCurrentLayerNumber + 1));
         handlePowderSurfaceComplete();
     }
     
+    // FALLING EDGE: LaySurface_Done TRUE → FALSE (simulator reset for next cycle)
+    // This happens after client calls writeLayerExecutionComplete()
+    if (mPreviousPowderSurfaceDone && !currentPowderSurfaceDone) {
+        log(QString("🔄 Falling edge detected: LaySurface_Done FALSE (ready for next layer request)"));
+        // Reset edge detector so next rising edge can be detected
+        // This is critical for layer 2, 3, 4, ... N to work correctly
+    }
+    
+    // Update state for next iteration
     mPreviousPowderSurfaceDone = currentPowderSurfaceDone;
 }
 
 void ProcessController::handlePowderSurfaceComplete() {
-    log(QString("- Layer Prepared by PLC!"));
+    log(QString("🟢 Layer %1: PLC preparation complete!").arg(mCurrentLayerNumber + 1));
     emit layerPreparedByPLC();
     
-    // NEW: Notify streaming manager that PLC layer is ready
+    // ========== CRITICAL FIX: NOTIFY STREAMING MANAGER ==========
+    // This wakes the consumer thread that's waiting on mCvPLCNotified
     if (mScanManager) {
         mScanManager->notifyPLCPrepared();
-        log("- Notified streaming manager: PLC layer ready");
+        log(QString("→ Layer %1: Consumer thread notified (PLC ready)").arg(mCurrentLayerNumber + 1));
+    } else {
+        log("⚠️ WARNING: ScanStreamingManager is null, cannot notify");
     }
     
     // Perform laser scanning if scanner is initialized

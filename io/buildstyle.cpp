@@ -13,7 +13,39 @@ using json = nlohmann::json;
 // ============================================================================
 
 bool BuildStyle::isValid() const {
-    return id > 0 && !name.empty() && laserPower > 0.0 && laserSpeed > 0.0;
+    // ========== VALIDATION RULES ==========
+    //
+    // REQUIRED:
+    // - id > 0 (valid BuildStyle ID)
+    // - name not empty (human-readable identifier)
+    // - laserSpeed > 0.0 (mark speed must be positive)
+    //
+    // OPTIONAL:
+    // - laserPower >= 0.0 (allows 0.0 for test mode / external control)
+    //   * 0.0 can mean: laser OFF (pilot marking)
+    //   * 0.0 can mean: power controlled by external DA converter
+    //   * 0.0 can mean: power set via RTC5 write_da_1/write_da_2 commands
+    //
+    return id > 0 && !name.empty() && laserPower >= 0.0 && laserSpeed > 0.0;
+}
+
+std::string BuildStyle::validationError() const {
+    // ========== DETAILED VALIDATION ERROR REPORTING ==========
+    // Returns specific reason why BuildStyle is invalid
+    
+    if (id == 0) {
+        return "id must be > 0 (got " + std::to_string(id) + ")";
+    }
+    if (name.empty()) {
+        return "name cannot be empty";
+    }
+    if (laserPower < 0.0) {
+        return "laserPower must be >= 0.0 (got " + std::to_string(laserPower) + ")";
+    }
+    if (laserSpeed <= 0.0) {
+        return "laserSpeed must be > 0.0 (got " + std::to_string(laserSpeed) + ")";
+    }
+    return "valid";
 }
 
 std::string BuildStyle::debugString() const {
@@ -129,8 +161,10 @@ bool BuildStyleLibrary::parseJsonArray(const std::string& jsonContent) {
 
             // Validate and insert
             if (!style.isValid()) {
-                throw std::runtime_error("Invalid buildStyle (id=" + std::to_string(style.id) + "): " +
-                                       style.name);
+                std::string reason = style.validationError();
+                throw std::runtime_error(
+                    "Invalid buildStyle (id=" + std::to_string(style.id) + 
+                    ", name='" + style.name + "'): " + reason);
             }
 
             mStyles[style.id] = style;

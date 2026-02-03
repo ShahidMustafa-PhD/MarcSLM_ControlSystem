@@ -19,7 +19,9 @@ cmake_install.cmake
 Makefile
 install/
 Untitled_Build/
-Femure_Build/
+Femure_Build/svgOutput
+Models/
+
 # Qt / IDE files
 *.pro.user
 .moc/

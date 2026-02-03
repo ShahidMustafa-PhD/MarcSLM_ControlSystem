@@ -297,7 +297,7 @@
       "laserMode": 1,
       "laserPower": 0.0,
       "laserFocus": 0.15,
-      "laserSpeed": 1.0,
+      "laserSpeed": 0.0,
       "hatchSpacing": 0.0,
       "layerThickness": 0.03,
       "pointDistance": 0.1,

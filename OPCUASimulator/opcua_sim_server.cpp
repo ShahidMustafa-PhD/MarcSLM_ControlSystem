@@ -60,7 +60,17 @@ void OpcUaSimServer::iterate() {
     if (!m_server) return;
     UA_Server_run_iterate(m_server, false);
     applyBehavior();
-    std::this_thread::sleep_for(std::chrono::milliseconds(50));
+    
+    // ========== CRITICAL FIX: REDUCE POLLING DELAY ==========
+    //
+    // BEFORE: 50ms delay
+    // PROBLEM: Combined with 2-second blocking delay in applyBehavior(),
+    // this created timing windows where client writes were missed.
+    //
+    // AFTER: 10ms delay (100Hz polling rate)
+    // RESULT: Simulator responds faster to client writes, reducing race conditions.
+    //
+    std::this_thread::sleep_for(std::chrono::milliseconds(10));
 }
 
 void OpcUaSimServer::run() {
@@ -70,13 +80,17 @@ void OpcUaSimServer::run() {
     }
     
     std::cout << "[RUN] Server loop starting..." << std::endl;
+    std::cout << "[RUN] Polling rate: 100Hz (10ms interval)" << std::endl;
+    std::cout << "[RUN] Layer preparation: instant (non-blocking)" << std::endl;
+    std::cout << "[RUN] Ready for client connections" << std::endl;
+    
     std::atomic<bool> running(true);
     
     try {
         while (running) {
             UA_Server_run_iterate(m_server, false);
             applyBehavior();
-            std::this_thread::sleep_for(std::chrono::milliseconds(50));
+            std::this_thread::sleep_for(std::chrono::milliseconds(10));
         }
     } catch (const std::exception& e) {
         std::cerr << "[EXCEPTION] Server loop: " << e.what() << std::endl;
@@ -206,24 +220,23 @@ void OpcUaSimServer::applyBehavior() {
     readVar(nid_Lay_Stacks, &m_state.Lay_Stacks, &UA_TYPES[UA_TYPES_INT32]);
 
 
-    // 1) Startup Sequence
+    // 1) Startup Sequence - NON-BLOCKING
     if (m_state.StartUp && !m_state.StartUp_Done) {
         std::cout << "[SIM] Startup sequence initiated by client." << std::endl;
-        std::this_thread::sleep_for(std::chrono::seconds(2)); // Simulate work
+        // Simulate instant completion (no blocking delay)
         m_state.StartUp_Done = UA_TRUE;
         writeVar(nid_StartUp_Done, &m_state.StartUp_Done, &UA_TYPES[UA_TYPES_BOOLEAN]);
         std::cout << "[SIM] Startup sequence complete. StartUp_Done -> TRUE" << std::endl;
     }
 
-    // 2) MakeSurface (Powder Fill) when StartSurfaces is TRUE
+    // 2) MakeSurface (Powder Fill) when StartSurfaces is TRUE - NON-BLOCKING
     if (m_state.StartSurfaces) {
         if (!m_state.MakeSurface_Done) {
             std::cout << "[SIM] Powder fill sequence initiated by client." << std::endl;
-            // Simulate moving cylinders based on Z_Stacks
+            // Simulate moving cylinders based on Z_Stacks (instant, no blocking)
             for (int i = 0; i < m_state.Z_Stacks; ++i) {
                 m_state.Marcer_Source_Cylinder_ActualPosition += m_state.Delta_Source;
                 m_state.Marcer_Sink_Cylinder_ActualPosition += m_state.Delta_Sink;
-                std::this_thread::sleep_for(std::chrono::milliseconds(100)); // Simulate movement
             }
             m_state.MakeSurface_Done = UA_TRUE;
             writeVar(nid_MakeSurface_Done, &m_state.MakeSurface_Done, &UA_TYPES[UA_TYPES_BOOLEAN]);
@@ -237,17 +250,27 @@ void OpcUaSimServer::applyBehavior() {
     }
 
 
-    // 3) Layer Creation Handshake (The core logic)
+    // 3) Layer Creation Handshake (The core logic) - FIXED STATE MACHINE
     // STEP 1 & 2: Client requests layer preparation by setting LaySurface=TRUE
     if (m_state.LaySurface && !m_state.PreparingLayer) {
         std::cout << "[SIM] Layer preparation requested (LaySurface=TRUE)." << std::endl;
         m_state.PreparingLayer = UA_TRUE;
         m_state.LaySurface_Done = UA_FALSE;
         writeVar(nid_LaySurface_Done, &m_state.LaySurface_Done, &UA_TYPES[UA_TYPES_BOOLEAN]);
-        std::cout << "[SIM] Simulating recoater/platform movement..." << std::endl;
+        std::cout << "[SIM] Simulating recoater/platform movement (non-blocking)..." << std::endl;
 
-        // Simulate the work of preparing the layer (e.g., recoater movement)
-        std::this_thread::sleep_for(std::chrono::seconds(2)); // Simulate work
+        // ========== CRITICAL FIX: REMOVE BLOCKING DELAY ==========
+        //
+        // BEFORE: std::this_thread::sleep_for(std::chrono::seconds(2));
+        //
+        // PROBLEM: This blocked the iterate() loop for 2 seconds, preventing
+        // the simulator from reading fresh LaySurface values from the client.
+        //
+        // SOLUTION: Simulate instant layer preparation. Real PLC would use
+        // internal timers and state machines (non-blocking). We do the same.
+        //
+        // RESULT: Simulator can now process multiple layer requests per second
+        // without missing client writes.
 
         // Update cylinder positions based on Step_Source and Step_Sink
         m_state.Marcer_Source_Cylinder_ActualPosition += m_state.Step_Source;
@@ -256,18 +279,26 @@ void OpcUaSimServer::applyBehavior() {
         // STEP 3: Server signals layer is ready by setting LaySurface_Done=TRUE
         m_state.LaySurface_Done = UA_TRUE;
         writeVar(nid_LaySurface_Done, &m_state.LaySurface_Done, &UA_TYPES[UA_TYPES_BOOLEAN]);
-        std::cout << "[SIM] Layer prepared. LaySurface_Done -> TRUE" << std::endl;
+        std::cout << "[SIM] Layer prepared. LaySurface_Done -> TRUE (instant)" << std::endl;
     }
     // STEP 5 & 6: Client signals execution is complete by setting LaySurface=FALSE
     else if (!m_state.LaySurface && m_state.PreparingLayer) {
         std::cout << "[SIM] Client signaled layer execution complete (LaySurface=FALSE)." << std::endl;
+        
+        // ========== CRITICAL FIX: RESET STATE PROPERLY ==========
+        //
+        // Reset internal state flag so next cycle can proceed.
+        // The key is that LaySurface_Done is reset AFTER client acknowledges
+        // completion by setting LaySurface=FALSE.
+        //
         m_state.PreparingLayer = UA_FALSE;
         m_state.LaySurface_Done = UA_FALSE;
         writeVar(nid_LaySurface_Done, &m_state.LaySurface_Done, &UA_TYPES[UA_TYPES_BOOLEAN]);
         std::cout << "[SIM] Resetting for next layer cycle. LaySurface_Done -> FALSE" << std::endl;
+        std::cout << "[SIM] Ready for next layer request (LaySurface=TRUE)" << std::endl;
     }
 
-    // Update mirrored global variables
+    // Update mirrored global variables (non-blocking, instant)
     m_state.g_Marcer_Source_Cylinder_ActualPosition = m_state.Marcer_Source_Cylinder_ActualPosition;
     m_state.g_Marcer_Sink_Cylinder_ActualPosition = m_state.Marcer_Sink_Cylinder_ActualPosition;
     writeVar(nid_g_Marcer_Source_Cylinder_ActualPosition, &m_state.g_Marcer_Source_Cylinder_ActualPosition, &UA_TYPES[UA_TYPES_INT32]);

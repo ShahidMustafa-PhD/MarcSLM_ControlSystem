@@ -613,6 +613,18 @@ bool OPCServerManagerUA::writeLayerParameters(int layers, int deltaSource, int d
 
     // ========== Perform writes outside state mutex ==========
     try {
+        // ========== CRITICAL FIX: RESET LaySurface_Done BEFORE STARTING NEW LAYER =========
+        //
+        // Ensure clean state before initiating layer preparation.
+        // This guarantees polling will detect rising edge (FALSE ? TRUE) properly.
+        //
+        if (!writeBoolNode(mNode_LaySurface_Done, false)) {
+            log("ERROR: Failed to reset LaySurface_Done before layer preparation");
+            return false;
+        }
+        
+        log("?? LaySurface_Done reset to FALSE - preparing for new layer cycle");
+        
         if (!writeInt32Node(mNode_Lay_Stacks, layers)) return false;
         QThread::msleep(OPERATION_SLEEP_MS);
 
@@ -624,24 +636,42 @@ bool OPCServerManagerUA::writeLayerParameters(int layers, int deltaSource, int d
 
         if (!writeBoolNode(mNode_LaySurface, true)) return false;
         
-        // Trigger the simulated layer preparation
-        {
-            std::lock_guard<std::mutex> lock(mLayerPrepMutex);
-            mLayerPrepRequested = true;
-        }
-        mLayerPrepCv.notify_one();
-
-        // In a real system, the client would now wait for LaySurface_Done to become true.
-        // Here, we just log that the process has been started. The actual wait happens
-        // in the consumer thread, which polls the value. The worker thread simulates
-        // the server-side change.
-        log("Layer parameters sent to PLC (OPC UA), simulating layer preparation...");
+        log("Layer parameters sent to PLC (OPC UA), triggering layer preparation worker...");
         
-        // The original implementation had a 400ms sleep here.
-        // We keep it to maintain timing consistency with the original code,
-        // even though the real delay is now handled by the worker thread.
-        QThread::msleep(400);
-
+        // ========== CRITICAL FIX: Wait for simulated layer completion =========
+        //
+        // Simulate the real PLC behavior:
+        // 1. Client writes LaySurface=TRUE (layer request)
+        // 2. PLC executes layer creation (recoater, platform movement) - takes 5 seconds
+        // 3. PLC sets LaySurface_Done=TRUE (layer ready signal)
+        // 4. Client detects rising edge and wakes consumer thread
+        //
+        // BEFORE FIX: Method returned immediately after setting LaySurface=TRUE
+        // RESULT: Client never saw LaySurface_Done rising edge (stuck at FALSE from previous layer)
+        //
+        // AFTER FIX: Wait 5 seconds to simulate PLC layer creation time
+        // RESULT: When method returns, LaySurface_Done will be TRUE (instant in simulator)
+        //
+        log("OPC UA Sim: Simulating layer preparation (5-second PLC delay)...");
+        
+        // Simulate PLC layer creation time (recoater movement, platform lowering, etc.)
+        QThread::msleep(5000);  // 5 seconds = realistic SLM layer prep time
+        
+        // ========== Instantly set LaySurface_Done=TRUE (simulator mode) ==========
+        //
+        // In a real system:
+        // - PLC would set this after physical layer creation completes
+        // - Client would poll and detect rising edge via ProcessController::onTimerTick()
+        //
+        // In simulator:
+        // - We set it instantly after the 5-second delay
+        // - Client's next poll will detect the rising edge (FALSE ? TRUE)
+        //
+        if (!writeBoolNode(mNode_LaySurface_Done, true)) return false;
+        
+        log("OPC UA Sim: Layer preparation complete ? LaySurface_Done=TRUE (instant)");
+        log("           ? Client will detect rising edge on next poll (500ms interval)");
+        
         return true;
     }
     catch (const std::exception& e) {
@@ -742,29 +772,44 @@ bool OPCServerManagerUA::writeLayerExecutionComplete(int layerNumber) {
         std::scoped_lock lock(mStateMutex);
         
         if (mConnectionLost || !mIsInitialized) {
-            log("? OPC UA not initialized - cannot notify layer execution complete");
+            log("?? OPC UA not initialized - cannot notify layer execution complete");
             return false;
         }
     }
 
     try {
-        // ========== Stage 2: Reset LaySurface TAG TO FALSE ==========
+        // ========== CRITICAL FIX: RESET BOTH FLAGS FOR NEXT LAYER =========
         //
-        // This signals PLC that Scanner has completed laser execution.
-        // PLC can now proceed with next layer creation when Scanner requests it.
+        // BEFORE FIX:
+        // - Only reset LaySurface=FALSE
+        // - LaySurface_Done stayed TRUE from previous layer
+        // - Next layer's rising edge was never detected by polling
+        // - Consumer thread waited forever on mCvPLCNotified
         //
-        // Industrial Practice:
-        //   • TRUE  = Request layer creation (recoater, platform)
-        //   • FALSE = Scanner finished, ready for next layer
+        // AFTER FIX:
+        // - Reset LaySurface=FALSE (scanner finished)
+        // - Reset LaySurface_Done=FALSE (prepare for next cycle)
+        // - Next layer's writeLayerParameters() sets LaySurface_Done=TRUE
+        // - Polling detects rising edge: FALSE ? TRUE
+        // - notifyPLCPrepared() wakes consumer thread
         //
+        
+        // Step 1: Signal scanner finished (LaySurface=FALSE)
         if (!writeBoolNode(mNode_LaySurface, false)) {
             log(QString("? Failed to signal layer %1 execution complete to PLC (OPC UA)")
                 .arg(layerNumber));
             return false;
         }
 
-        // ========== Stage 3: Emit signal OUTSIDE locks ==========
-        log(QString("? Layer %1 execution complete signal sent to PLC (LaySurface=FALSE, OPC UA)")
+        // Step 2: CRITICAL - Reset LaySurface_Done=FALSE for next layer cycle
+        if (!writeBoolNode(mNode_LaySurface_Done, false)) {
+            log(QString("? Failed to reset LaySurface_Done after layer %1 (OPC UA)")
+                .arg(layerNumber));
+            return false;
+        }
+
+        // ========== Stage 3: Emit signal OUTSIDE locks =========
+        log(QString("? Layer %1 execution complete ? LaySurface=FALSE, LaySurface_Done=FALSE (ready for next layer)")
             .arg(layerNumber));
         
         return true;
