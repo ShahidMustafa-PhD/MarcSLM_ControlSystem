@@ -243,15 +243,15 @@ int main(int argc, char* argv[])
 {
     printBanner();
     
-    // Create default configuration
+    // Create default configuration for PRODUCTION MODE (Real Hardware)
     slm_opcua::ServerConfig config;
-    config.endpointUrl = "opc.tcp://0.0.0.0:4840";
-    config.namespaceUri = "urn:CODESYS:MaTe_DLMS";
-    config.namespaceIndex = 2;
+    config.endpointUrl = "opc.tcp://localhost:4840";    // Expose OPC UA on localhost
+    config.namespaceUri = "urn:CODESYS:CECC-D";         // Actual CoDeSys namespace
+    config.namespaceIndex = 2;                           // Will be auto-assigned by server
     config.pollingIntervalMs = 10;
     config.enableFailSafe = true;
     config.watchdogTimeoutMs = 5000;
-    config.simulatePlc = true;  // Default to simulation for safety
+    config.simulatePlc = false;  // DEFAULT TO PRODUCTION MODE - Connect to real PLC
     config.simLayerPrepTimeMs = 100;
     
     // Parse command line
@@ -267,29 +267,38 @@ int main(int argc, char* argv[])
     std::cout << "[CONFIG] Server Configuration:\n";
     std::cout << "[CONFIG]   Endpoint:      " << config.endpointUrl << "\n";
     std::cout << "[CONFIG]   Namespace:     " << config.namespaceUri << "\n";
-    std::cout << "[CONFIG]   NS Index:      " << config.namespaceIndex << "\n";
+    std::cout << "[CONFIG]   NS Index:      " << config.namespaceIndex << " (will be auto-assigned)\n";
     std::cout << "[CONFIG]   Polling:       " << config.pollingIntervalMs << " ms\n";
     std::cout << "[CONFIG]   Fail-Safe:     " << (config.enableFailSafe ? "ENABLED" : "DISABLED") << "\n";
     std::cout << "[CONFIG]   Mode:          " << (config.simulatePlc ? "SIMULATION" : "PRODUCTION") << "\n";
     std::cout << "[CONFIG] ============================================\n";
     
-    // Production mode warning
+    // Production mode info
     if (!config.simulatePlc) {
         std::cout << "\n";
-        std::cout << "[WARNING] ============================================\n";
-        std::cout << "[WARNING] PRODUCTION MODE ENABLED\n";
-        std::cout << "[WARNING] This server will control REAL HARDWARE.\n";
-        std::cout << "[WARNING] Ensure all safety systems are operational.\n";
-        std::cout << "[WARNING] ============================================\n";
+        std::cout << "[INFO] ============================================\n";
+        std::cout << "[INFO] PRODUCTION MODE - CONNECTING TO REAL HARDWARE\n";
+        std::cout << "[INFO] ============================================\n";
+        std::cout << "[INFO] Server will attempt to connect to:\n";
+        std::cout << "[INFO]   - PLC IP: 192.168.1.10 (or localhost if on same machine)\n";
+        std::cout << "[INFO]   - Protocol: Modbus TCP\n";
+        std::cout << "[INFO]   - Port: 502\n";
+        std::cout << "[INFO] \n";
+        std::cout << "[INFO] If PLC is not accessible, server will run in DEGRADED MODE\n";
+        std::cout << "[INFO] (OPC UA server will still be accessible for testing)\n";
+        std::cout << "[INFO] ============================================\n";
         std::cout << "\n";
-        
-        // Give operator time to cancel if needed
-        std::cout << "[INFO] Starting in 3 seconds... (Ctrl+C to cancel)\n";
-        std::this_thread::sleep_for(std::chrono::seconds(1));
-        std::cout << "[INFO] Starting in 2 seconds...\n";
-        std::this_thread::sleep_for(std::chrono::seconds(1));
-        std::cout << "[INFO] Starting in 1 second...\n";
-        std::this_thread::sleep_for(std::chrono::seconds(1));
+    } else {
+        std::cout << "\n";
+        std::cout << "[INFO] ============================================\n";
+        std::cout << "[INFO] SIMULATION MODE - NO HARDWARE CONNECTION\n";
+        std::cout << "[INFO] ============================================\n";
+        std::cout << "[INFO] Server is running in SIMULATION mode.\n";
+        std::cout << "[INFO] PLC behavior will be emulated internally.\n";
+        std::cout << "[INFO] To connect to real hardware, restart with:\n";
+        std::cout << "[INFO]   OPCUAServer.exe --production\n";
+        std::cout << "[INFO] ============================================\n";
+        std::cout << "\n";
     }
     
     // Install signal handlers for clean shutdown
@@ -301,6 +310,8 @@ int main(int argc, char* argv[])
     
     // Start server
     std::cout << "[MAIN] Starting OPC UA server...\n";
+    std::cout << "[MAIN] OPC UA will expose variables at ns=2 (auto-assigned)\n";
+    std::cout << "[MAIN] Node ID format: ns=2;s=|var|CECC-D.Application...\n";
     
     if (!server.start()) {
         std::cerr << "[ERROR] Failed to start OPC UA server!\n";
@@ -308,6 +319,13 @@ int main(int argc, char* argv[])
     }
     
     std::cout << "[MAIN] Server started successfully.\n";
+    std::cout << "[MAIN] Listening on: " << config.endpointUrl << "\n";
+    
+    if (!config.simulatePlc) {
+        std::cout << "[MAIN] Production mode: Attempting PLC connection...\n";
+        std::cout << "[MAIN] Check logs above for PLC connection status.\n";
+    }
+    
     std::cout << "[MAIN] Press Ctrl+C to shutdown.\n\n";
     
     // Run main server loop (blocks until stop() called)

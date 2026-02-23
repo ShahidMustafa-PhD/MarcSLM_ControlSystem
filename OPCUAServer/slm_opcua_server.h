@@ -13,13 +13,13 @@
  * 
  * @par Node ID Format (CoDeSys Convention):
  * @code
- * CECC.MaTe_DLMS.<FunctionBlock>.<Variable>
+ * ns=4;s=|var|CECC-D.Application.<FunctionBlock>.<Variable>
  * @endcode
  * 
  * Examples:
- * - CECC.MaTe_DLMS.StartUpSequence.StartUp
- * - CECC.MaTe_DLMS.Prepare2Process.LaySurface
- * - CECC.MaTe_DLMS.MakeSurface.Z_Stacks
+ * - ns=4;s=|var|CECC-D.Application.StartUpSequence.StartUp
+ * - ns=4;s=|var|CECC-D.Application.MakeSurface.Z_Stacks
+ * - ns=4;s=|var|CECC-D.Application.MakeSurface.Layer_Ready
  * 
  * @par Safety Features:
  * - Fail-safe controller integration
@@ -69,14 +69,14 @@ namespace slm_opcua {
  * @brief Server configuration parameters
  */
 struct ServerConfig {
-    /** @brief OPC UA endpoint URL (default: opc.tcp://0.0.0.0:4840) */
-    std::string endpointUrl = "opc.tcp://0.0.0.0:4840";
+    /** @brief OPC UA endpoint URL (default: opc.tcp://localhost:4840) */
+    std::string endpointUrl = "opc.tcp://localhost:4840";
     
     /** @brief Namespace URI for SLM variables */
-    std::string namespaceUri = "urn:CODESYS:MaTe_DLMS";
+    std::string namespaceUri = "urn:CODESYS:CECC-D";
     
-    /** @brief Default namespace index (CoDeSys convention: 2) */
-    uint16_t namespaceIndex = 2;
+    /** @brief Default namespace index (CoDeSys actual: 4) */
+    uint16_t namespaceIndex = 4;
     
     /** @brief Server polling interval (ms) */
     uint32_t pollingIntervalMs = 10;
@@ -115,7 +115,7 @@ struct ServerConfig {
  * @par Usage Example:
  * @code
  * slm_opcua::ServerConfig config;
- * config.endpointUrl = "opc.tcp://0.0.0.0:4840";
+ * config.endpointUrl = "opc.tcp://localhost:4840";
  * config.simulatePlc = false;  // Production mode
  * 
  * slm_opcua::SlmOpcUaServer server(config);
@@ -249,22 +249,6 @@ private:
      */
     bool addVariables();
     
-    /**
-     * @brief Add a single variable node
-     * 
-     * @param nodeId Output: assigned node ID
-     * @param identifier Node identifier string
-     * @param dataType Data type (e.g., UA_TYPES_INT32)
-     * @param initialValue Pointer to initial value
-     * @param writable true if client can write
-     * @return true if variable added successfully
-     */
-    bool addVariable(UA_NodeId& nodeId,
-                     const char* identifier,
-                     const UA_DataType* dataType,
-                     const void* initialValue,
-                     bool writable);
-    
     // ========================================================================
     // PLC Behavior Simulation
     // ========================================================================
@@ -330,8 +314,8 @@ private:
     ServerConfig m_config;
     
     // ========== OPC UA Server ==========
-    UA_Server* m_server;
-    uint16_t m_nsIndex;
+    UA_Server* m_server = nullptr;
+    uint16_t m_nsIndex = 0;
     std::mutex m_serverMutex;
     
     // ========== State Management ==========
@@ -343,30 +327,38 @@ private:
     // ========== CoDeSys PLC Interface (Production Mode) ==========
     std::unique_ptr<CodesysPlcInterface> m_plcInterface;
     
-    // ========== Node IDs ==========
+    // ========== Node IDs (Matching Actual PLC Variables) ==========
     struct {
-        UA_NodeId Z_Stacks;
-        UA_NodeId Delta_Source;
-        UA_NodeId Delta_Sink;
-        UA_NodeId MakeSurface_Done;
-        UA_NodeId Marcer_Source_Cylinder_ActualPosition;
-        UA_NodeId Marcer_Sink_Cylinder_ActualPosition;
+        // MakeSurface nodes
+        UA_NodeId Z_Stacks;                                 // INT16
+        UA_NodeId Delta_Source;                             // INT32
+        UA_NodeId Delta_Sink;                               // INT32
+        UA_NodeId Layer_Ready;                              // BOOL
+        UA_NodeId Marcer_Source_Cylinder_ActualPosition;    // INT32
+        UA_NodeId Marcer_Sink_Cylinder_ActualPosition;      // INT32
+        UA_NodeId Source_Ready;                             // BOOL
+        UA_NodeId Surfaces_Control;                         // INT16
+        UA_NodeId SurfaceStepFlag;                          // BOOL
+        UA_NodeId SurfaceStepFlag_Test;                     // BOOL
         
-        // GVL
-        UA_NodeId StartSurfaces;
-        UA_NodeId g_Marcer_Source_Cylinder_ActualPosition;
-        UA_NodeId g_Marcer_Sink_Cylinder_ActualPosition;
+        // StartUpSequence nodes
+        UA_NodeId StartUp;                                  // BOOL
         
-        // Prepare2Process
-        UA_NodeId LaySurface;
-        UA_NodeId LaySurface_Done;
-        UA_NodeId Step_Sink;
-        UA_NodeId Step_Source;
-        UA_NodeId Lay_Stacks;
+        // GVL nodes (if needed)
+        UA_NodeId GlobalVars;                               // BOOL (|appo| prefix)
+        UA_NodeId Marcer_Sink_Cylinder_AckStart;           // BOOL
         
-        // StartUpSequence
-        UA_NodeId StartUp;
-        UA_NodeId StartUp_Done;
+        // Legacy compatibility nodes (for client)
+        UA_NodeId MakeSurface_Done;     // Maps to Layer_Ready
+        UA_NodeId StartUp_Done;         // Server-generated
+        UA_NodeId StartSurfaces;        // Maps to Surfaces_Control
+        UA_NodeId LaySurface;           // Server-generated
+        UA_NodeId LaySurface_Done;      // Maps to Layer_Ready
+        UA_NodeId Step_Sink;            // Maps to Delta_Sink
+        UA_NodeId Step_Source;          // Maps to Delta_Source
+        UA_NodeId Lay_Stacks;           // Maps to Z_Stacks
+        UA_NodeId g_Marcer_Source_Cylinder_ActualPosition;  // Copy of actual pos
+        UA_NodeId g_Marcer_Sink_Cylinder_ActualPosition;    // Copy of actual pos
     } m_nodes;
     
     // Track allocated node IDs for cleanup

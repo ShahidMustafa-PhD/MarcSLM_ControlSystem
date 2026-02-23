@@ -1,4 +1,4 @@
-#include "opcserverua.h"
+﻿#include "opcserverua.h"
 
 #include <QThread>
 #include <cstring>
@@ -103,6 +103,7 @@ bool OPCServerManagerUA::initialize() {
 
         log("OPC UA Server connected successfully");
 
+       
         // ========== Setup all node IDs ==========
         log("Setting up node IDs...");
         setupNodeIds();
@@ -201,36 +202,38 @@ UA_NodeId OPCServerManagerUA::createNodeId(const QString& nodeIdString) {
     // The returned UA_NodeId MUST be cleared with UA_NodeId_clear() before destruction.
     // This is handled centrally in clearAllNodeIds() during shutdown.
     
-    QByteArray utf8Bytes = nodeIdString.toUtf8();
-    return UA_NODEID_STRING_ALLOC(mNamespaceIndex, utf8Bytes.constData());
+    //QByteArray utf8Bytes = nodeIdString.toUtf8();
+    //return UA_NODEID_STRING_ALLOC(mNamespaceIndex, utf8Bytes.constData());
+    return UA_NODEID_STRING_ALLOC(mNamespaceIndex, nodeIdString.toUtf8().constData());
 }
-
+/*
 void OPCServerManagerUA::setupNodeIds() {
     log("Setting up OPC UA node IDs...");
 
     // ========== MakeSurface nodes ==========
-    mNode_layersMax = createNodeId("CECC.MaTe_DLMS.MakeSurface.Z_Stacks");
-    mNode_delta_Source = createNodeId("CECC.MaTe_DLMS.MakeSurface.Delta_Source");
-    mNode_delta_Sink = createNodeId("CECC.MaTe_DLMS.MakeSurface.Delta_Sink");
-    mNode_MakeSurface_Done = createNodeId("CECC.MaTe_DLMS.MakeSurface.MakeSurface_Done");
-    mNode_Marcer_Source_Cylinder_ActualPosition = createNodeId("CECC.MaTe_DLMS.MakeSurface.Marcer_Source_Cylinder_ActualPosition");
-    mNode_Marcer_Sink_Cylinder_ActualPosition = createNodeId("CECC.MaTe_DLMS.MakeSurface.Marcer_Sink_Cylinder_ActualPosition");
+    //mNode_layersMax = createNodeId("CECC.MaTe_DLMS.MakeSurface.Z_Stacks");//s=|var|CECC-D.Application.MakeSurface.Z_Stacks
+    mNode_layersMax = createNodeId("CECC-D.Application.MakeSurface.Z_Stacks");
+    mNode_delta_Source = createNodeId("CECC-D.Application.MakeSurface.Delta_Source");
+    mNode_delta_Sink = createNodeId("CECC-D.Application.MakeSurface.Delta_Sink");
+    mNode_MakeSurface_Done = createNodeId("CECC-D.Application.MakeSurface.MakeSurface_Done");
+    mNode_Marcer_Source_Cylinder_ActualPosition = createNodeId("CECC-D.Application.MakeSurface.Marcer_Source_Cylinder_ActualPosition");
+    mNode_Marcer_Sink_Cylinder_ActualPosition = createNodeId("CECC-D.Application.MakeSurface.Marcer_Sink_Cylinder_ActualPosition");
 
     // ========== GVL nodes ==========
-    mNode_StartSurfaces = createNodeId("CECC.MaTe_DLMS.GVL.StartSurfaces");
-    mNode_g_Marcer_Source_Cylinder_ActualPosition = createNodeId("CECC.MaTe_DLMS.GVL.g_Marcer_Source_Cylinder_ActualPosition");
-    mNode_g_Marcer_Sink_Cylinder_ActualPosition = createNodeId("CECC.MaTe_DLMS.GVL.g_Marcer_Sink_Cylinder_ActualPosition");
+    mNode_StartSurfaces = createNodeId("CECC-D.Application.GVL.StartSurfaces");
+    mNode_g_Marcer_Source_Cylinder_ActualPosition = createNodeId("CECC-D.Application.GVL.g_Marcer_Source_Cylinder_ActualPosition");
+    mNode_g_Marcer_Sink_Cylinder_ActualPosition = createNodeId("CECC-D.Application.GVL.g_Marcer_Sink_Cylinder_ActualPosition");
 
     // ========== Prepare2Process nodes ==========
-    mNode_LaySurface = createNodeId("CECC.MaTe_DLMS.Prepare2Process.LaySurface");
-    mNode_LaySurface_Done = createNodeId("CECC.MaTe_DLMS.Prepare2Process.LaySurface_Done");
-    mNode_Step_Sink = createNodeId("CECC.MaTe_DLMS.Prepare2Process.Step_Sink");
-    mNode_Step_Source = createNodeId("CECC.MaTe_DLMS.Prepare2Process.Step_Source");
-    mNode_Lay_Stacks = createNodeId("CECC.MaTe_DLMS.Prepare2Process.Lay_Stacks");
+    mNode_LaySurface = createNodeId("CECC-D.Application.Prepare2Process.LaySurface");
+    mNode_LaySurface_Done = createNodeId("CECC-D.Application.Prepare2Process.LaySurface_Done");
+    mNode_Step_Sink = createNodeId("CECC-D.Application.Prepare2Process.Step_Sink");
+    mNode_Step_Source = createNodeId("CECC-D.Application.Prepare2Process.Step_Source");
+    mNode_Lay_Stacks = createNodeId("CECC-D.Application.Prepare2Process.Lay_Stacks");
 
     // ========== StartUpSequence nodes ==========
-    mNode_StartUp = createNodeId("CECC.MaTe_DLMS.StartUpSequence.StartUp");
-    mNode_StartUp_Done = createNodeId("CECC.MaTe_DLMS.StartUpSequence.StartUp_Done");
+    mNode_StartUp = createNodeId("CECC-D.Application.StartUpSequence.StartUp");
+    mNode_StartUp_Done = createNodeId("CECC-D.Application.StartUpSequence.StartUp_Done");
 
     // ========== Readback nodes (same as write nodes for OPC UA) ==========
     mNode_Marcer_Source_Cylinder_ActualPosition_Read = mNode_Marcer_Source_Cylinder_ActualPosition;
@@ -243,6 +246,47 @@ void OPCServerManagerUA::setupNodeIds() {
     mNode_LaySurface_Done_Read = mNode_LaySurface_Done;
 
     log(QString("? Successfully created OPC UA node IDs (namespace: %1)").arg(mNamespaceIndex));
+}*/
+
+
+void OPCServerManagerUA::setupNodeIds() {
+    log("Setting up OPC UA node IDs...");
+
+    // ========== MakeSurface nodes ==========
+    mNode_layersMax = createNodeId("|var|CECC-D.Application.MakeSurface.Z_Stacks");
+    mNode_delta_Source = createNodeId("|var|CECC-D.Application.MakeSurface.Delta_Source");
+    mNode_delta_Sink = createNodeId("|var|CECC-D.Application.MakeSurface.Delta_Sink");
+    mNode_MakeSurface_Done = createNodeId("|var|CECC-D.Application.MakeSurface.MakeSurface_Done");
+    mNode_Marcer_Source_Cylinder_ActualPosition = createNodeId("|var|CECC-D.Application.MakeSurface.Marcer_Source_Cylinder_ActualPosition");
+    mNode_Marcer_Sink_Cylinder_ActualPosition = createNodeId("|var|CECC-D.Application.MakeSurface.Marcer_Sink_Cylinder_ActualPosition");
+
+    // ========== GVL nodes ==========
+    mNode_StartSurfaces = createNodeId("|var|CECC-D.Application.GVL.StartSurfaces");
+    mNode_g_Marcer_Source_Cylinder_ActualPosition = createNodeId("|var|CECC-D.Application.GVL.g_Marcer_Source_Cylinder_ActualPosition");
+    mNode_g_Marcer_Sink_Cylinder_ActualPosition = createNodeId("|var|CECC-D.Application.GVL.g_Marcer_Sink_Cylinder_ActualPosition");
+
+    // ========== Prepare2Process nodes ==========
+    mNode_LaySurface = createNodeId("|var|CECC-D.Application.Prepare2Process.LaySurface");
+    mNode_LaySurface_Done = createNodeId("|var|CECC-D.Application.Prepare2Process.LaySurface_Done");
+    mNode_Step_Sink = createNodeId("|var|CECC-D.Application.Prepare2Process.Step_Sink");
+    mNode_Step_Source = createNodeId("|var|CECC-D.Application.Prepare2Process.Step_Source");
+    mNode_Lay_Stacks = createNodeId("|var|CECC-D.Application.Prepare2Process.Lay_Stacks");
+
+    // ========== StartUpSequence nodes ==========
+    mNode_StartUp = createNodeId("|var|CECC-D.Application.StartUpSequence.StartUp");
+    mNode_StartUp_Done = createNodeId("|var|CECC-D.Application.StartUpSequence.StartUp_Done");
+
+    // ========== Readback nodes (Deep Copy to prevent memory corruption) ==========
+    UA_NodeId_copy(&mNode_Marcer_Source_Cylinder_ActualPosition, &mNode_Marcer_Source_Cylinder_ActualPosition_Read);
+    UA_NodeId_copy(&mNode_Marcer_Sink_Cylinder_ActualPosition, &mNode_Marcer_Sink_Cylinder_ActualPosition_Read);
+    UA_NodeId_copy(&mNode_layersMax, &mNode_Z_Stacks);
+    UA_NodeId_copy(&mNode_MakeSurface_Done, &mNode_MakeSurface_Done_Read);
+    UA_NodeId_copy(&mNode_StartUp_Done, &mNode_StartUp_Done_Read);
+    UA_NodeId_copy(&mNode_g_Marcer_Source_Cylinder_ActualPosition, &mNode_g_Marcer_Source_Cylinder_ActualPosition_Read);
+    UA_NodeId_copy(&mNode_g_Marcer_Sink_Cylinder_ActualPosition, &mNode_g_Marcer_Sink_Cylinder_ActualPosition_Read);
+    UA_NodeId_copy(&mNode_LaySurface_Done, &mNode_LaySurface_Done_Read);
+
+    log(QString("✔️ Successfully created OPC UA node IDs (namespace: %1)").arg(mNamespaceIndex));
 }
 
 // ============================================================================
@@ -574,6 +618,10 @@ bool OPCServerManagerUA::writePowderFillParameters(int layers, int deltaSource, 
         }
     }
 
+    // --- Debug: Browse address space ---
+       //if (isInitialized()) {
+          // browseAddressSpace();
+       //}
     // ========== Perform writes outside state mutex ==========
     try {
         QThread::msleep(OPERATION_SLEEP_MS);
@@ -862,14 +910,14 @@ void OPCServerManagerUA::clearAllNodeIds() {
     // Only clear if they are unique allocations (non-alias)
     // For safety: clear all to ensure no resource leaks
    
-    //UA_NodeId_clear(&mNode_Marcer_Source_Cylinder_ActualPosition_Read);
-    //UA_NodeId_clear(&mNode_Marcer_Sink_Cylinder_ActualPosition_Read);
-    //UA_NodeId_clear(&mNode_Z_Stacks);
-    //UA_NodeId_clear(&mNode_MakeSurface_Done_Read);
-    //UA_NodeId_clear(&mNode_StartUp_Done_Read);
-    //UA_NodeId_clear(&mNode_g_Marcer_Source_Cylinder_ActualPosition_Read);
-   // UA_NodeId_clear(&mNode_g_Marcer_Sink_Cylinder_ActualPosition_Read);
-   // UA_NodeId_clear(&mNode_LaySurface_Done_Read);
+    UA_NodeId_clear(&mNode_Marcer_Source_Cylinder_ActualPosition_Read);
+    UA_NodeId_clear(&mNode_Marcer_Sink_Cylinder_ActualPosition_Read);
+    UA_NodeId_clear(&mNode_Z_Stacks);
+    UA_NodeId_clear(&mNode_MakeSurface_Done_Read);
+    UA_NodeId_clear(&mNode_StartUp_Done_Read);
+    UA_NodeId_clear(&mNode_g_Marcer_Source_Cylinder_ActualPosition_Read);
+    UA_NodeId_clear(&mNode_g_Marcer_Sink_Cylinder_ActualPosition_Read);
+    UA_NodeId_clear(&mNode_LaySurface_Done_Read);
 
     log("All OPC UA node IDs cleared");
 }
@@ -964,4 +1012,82 @@ void OPCServerManagerUA::stop() {
     // The destructor will handle the final join.
 
     log("OPC UA connection stopped successfully");
+}
+
+void OPCServerManagerUA::browseAddressSpace() {
+    // 1. CRITICAL: Lock the mutex to ensure thread-safe access to mClient
+    std::lock_guard<std::mutex> lock(mUaCallMutex);
+
+    if (!mClient) {
+        log("Cannot browse: OPC UA client not initialized.");
+        return;
+    }
+
+    // Start browsing from the Objects folder (standard root for user nodes)
+    UA_NodeId startingNode = UA_NODEID_NUMERIC(0, UA_NS0ID_OBJECTSFOLDER);
+
+    UA_BrowseRequest bReq;
+    UA_BrowseRequest_init(&bReq);
+    bReq.requestedMaxReferencesPerNode = 1000; // Increased to catch large folders
+
+    // Allocate memory for the nodes to browse
+    bReq.nodesToBrowse = (UA_BrowseDescription*)UA_Array_new(1, &UA_TYPES[UA_TYPES_BROWSEDESCRIPTION]);
+    bReq.nodesToBrowseSize = 1;
+
+    // 2. Safely copy the node ID to prevent double-free during cleanup
+    UA_NodeId_copy(&startingNode, &bReq.nodesToBrowse[0].nodeId);
+
+    // 3. Explicitly define HOW to browse the tree
+    bReq.nodesToBrowse[0].resultMask = UA_BROWSERESULTMASK_ALL;
+    bReq.nodesToBrowse[0].browseDirection = UA_BROWSEDIRECTION_FORWARD;
+    bReq.nodesToBrowse[0].referenceTypeId = UA_NODEID_NUMERIC(0, UA_NS0ID_HIERARCHICALREFERENCES);
+    bReq.nodesToBrowse[0].includeSubtypes = true;
+
+    // Execute the browse request
+    UA_BrowseResponse bResp = UA_Client_Service_browse(mClient.get(), bReq);
+
+    // 4. CRITICAL: Verify the server actually processed the request successfully
+    if (bResp.responseHeader.serviceResult == UA_STATUSCODE_GOOD) {
+
+        for (size_t i = 0; i < bResp.resultsSize; ++i) {
+            // Ensure this specific node's browse result is valid
+            if (bResp.results[i].statusCode != UA_STATUSCODE_GOOD) continue;
+
+            for (size_t j = 0; j < bResp.results[i].referencesSize; ++j) {
+                UA_ReferenceDescription* ref = &bResp.results[i].references[j];
+
+                QString nodeIdStr;
+                if (ref->nodeId.nodeId.identifierType == UA_NODEIDTYPE_STRING) {
+                    nodeIdStr = QString::fromUtf8((const char*)ref->nodeId.nodeId.identifier.string.data,
+                        ref->nodeId.nodeId.identifier.string.length);
+                }
+                else if (ref->nodeId.nodeId.identifierType == UA_NODEIDTYPE_NUMERIC) {
+                    nodeIdStr = QString("Numeric: %1").arg(ref->nodeId.nodeId.identifier.numeric);
+                }
+                else {
+                    nodeIdStr = QString("Other type");
+                }
+
+                // Safely extract DisplayName (checking for null pointers)
+                QString displayName = "Unknown";
+                if (ref->displayName.text.data && ref->displayName.text.length > 0) {
+                    displayName = QString::fromUtf8((const char*)ref->displayName.text.data,
+                        ref->displayName.text.length);
+                }
+
+                log(QString("[BROWSE] Node: %1 | ns=%2 | idType=%3 | DisplayName=%4")
+                    .arg(nodeIdStr)
+                    .arg(ref->nodeId.nodeId.namespaceIndex)
+                    .arg(ref->nodeId.nodeId.identifierType)
+                    .arg(displayName));
+            }
+        }
+    }
+    else {
+        log(QString("Browse request failed with status code: %1").arg(bResp.responseHeader.serviceResult));
+    }
+
+    // 5. Clean up allocated memory
+    UA_BrowseRequest_clear(&bReq);
+    UA_BrowseResponse_clear(&bResp);
 }

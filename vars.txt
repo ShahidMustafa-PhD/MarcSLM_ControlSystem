@@ -1,0 +1,24 @@
+ns=4;s=|var|CECC-D.Application.MakeSurface.Delta_Sink    int32
+ns=4;s=|var|CECC-D.Application.MakeSurface.Delta_Source    int32
+ns=4;s=|var|CECC-D.Application.MakeSurface.Layer_Ready
+ns=4;s=|var|CECC-D.Application.MakeSurface.Marcer_Sink_Cylinder_ActualPosition     int32
+ns=4;s=|var|CECC-D.Application.MakeSurface.Marcer_Source_Cylinder_ActualPosition     int32
+ns=4;s=|var|CECC-D.Application.MakeSurface.Source_Ready      bool
+ns=4;s=|var|CECC-D.Application.MakeSurface.Surfaces_Control       int16
+ns=4;s=|var|CECC-D.Application.MakeSurface.SurfaceStepFlag_Test    bool
+ns=4;s=|var|CECC-D.Application.MakeSurface.Z_Stacks     int16
+ns=4;s=|var|CECC-D.Application.StartUpSequence.StartUp                    boool
+ns=4;s=|appo|CECC-D.Application.GlobalVars                            bool
+ns=4;s=|var|CECC-D.Application.GVL.Marcer_Sink_Cylinder.AckStart              bool
+ns=4;s=|var|CECC-D.Application.MakeSurface.Delta_Sink      int32
+ns=4;s=|var|CECC-D.Application.MakeSurface.Delta_Source    int32
+ns=4;s=|var|CECC-D.Application.MakeSurface.Layer_Ready       bool
+ns=4;s=|var|CECC-D.Application.MakeSurface.Marcer_Sink_Cylinder_ActualPosition      int32
+ns=4;s=|var|CECC-D.Application.MakeSurface.Marcer_Source_Cylinder_ActualPosition     int32
+ ns=4;s=|var|CECC-D.Application.MakeSurface.Source_Ready       bool
+ns=4;s=|var|CECC-D.Application.MakeSurface.Surfaces_Control   int16
+ns=4;s=|var|CECC-D.Application.MakeSurface.SurfaceStepFlag    bool
+ns=4;s=|var|CECC-D.Application.MakeSurface.SurfaceStepFlag_Test     bool
+ns=4;s=|var|CECC-D.Application.MakeSurface.Z_Stacks       int16
+
+ns=4;s=|var|CECC-D.Application.StartUpSequence.StartUp        bool

@@ -13,6 +13,7 @@
 #include <open62541/client_config_default.h>
 #include <open62541/client_highlevel.h>
 
+
 // ============================================================================
 // RAII Wrapper for UA_Client Lifecycle
 // ============================================================================
@@ -121,7 +122,7 @@ class OPCServerManagerUA : public QObject {
 
 public:
     // ========== Public Constants ==========
-    static constexpr uint16_t DEFAULT_NAMESPACE_INDEX = 2;
+    static constexpr uint16_t DEFAULT_NAMESPACE_INDEX = 2;  // Match server's actual namespace
     static constexpr const char* DEFAULT_SERVER_URL = "opc.tcp://localhost:4840";
     static constexpr uint32_t CONNECTION_TIMEOUT_MS = 5000;
     static constexpr uint32_t OPERATION_SLEEP_MS = 100;
@@ -137,6 +138,8 @@ public:
     bool initialize();
     bool isInitialized() const;
     void stop();  // NEW: Safely shut down OPC UA connection
+
+    void browseAddressSpace();
 
     // OPC Operations (identical interface to OPCServerManager)
     bool writeStartUp(bool value);

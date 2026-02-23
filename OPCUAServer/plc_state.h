@@ -57,82 +57,101 @@ namespace limits {
 /**
  * @brief Complete PLC state for SLM control
  * 
- * @details This structure mirrors the CoDeSys PLC variable layout used in
- * the physical SLM controller. Variable names match OPC UA node identifiers.
+ * @details This structure mirrors the actual CoDeSys PLC variable layout.
+ * Variable names and types match the actual PLC nodes exactly.
  * 
- * @par Variable Groups:
- * - **MakeSurface**: Powder bed surface preparation
- * - **GVL**: Global Variable List (system-wide state)
- * - **Prepare2Process**: Layer-by-layer preparation
- * - **StartUpSequence**: Machine initialization
+ * @par Actual PLC Node IDs:
+ * - ns=4;s=|var|CECC-D.Application.MakeSurface.Z_Stacks [INT16]
+ * - ns=4;s=|var|CECC-D.Application.MakeSurface.Delta_Source [INT32]
+ * - ns=4;s=|var|CECC-D.Application.MakeSurface.Delta_Sink [INT32]
+ * - ns=4;s=|var|CECC-D.Application.MakeSurface.Layer_Ready [BOOL]
+ * - ns=4;s=|var|CECC-D.Application.MakeSurface.Marcer_Source_Cylinder_ActualPosition [INT32]
+ * - ns=4;s=|var|CECC-D.Application.MakeSurface.Marcer_Sink_Cylinder_ActualPosition [INT32]
+ * - ns=4;s=|var|CECC-D.Application.MakeSurface.Source_Ready [BOOL]
+ * - ns=4;s=|var|CECC-D.Application.MakeSurface.Surfaces_Control [INT16]
+ * - ns=4;s=|var|CECC-D.Application.MakeSurface.SurfaceStepFlag [BOOL]
+ * - ns=4;s=|var|CECC-D.Application.MakeSurface.SurfaceStepFlag_Test [BOOL]
+ * - ns=4;s=|var|CECC-D.Application.StartUpSequence.StartUp [BOOL]
  * 
  * @par Thread Safety:
  * Direct access is NOT thread-safe. Use PlcStateGuard for protected access.
  */
 struct PlcState {
     // ========================================================================
-    // MakeSurface Variables
+    // MakeSurface Variables (Actual PLC)
     // ========================================================================
     
-    /** @brief Number of powder layers to create during surface preparation */
-    UA_Int32 Z_Stacks = 0;
+    /** @brief Number of powder layers to create during surface preparation [INT16] */
+    UA_Int16 Z_Stacks = 0;
     
-    /** @brief Source cylinder delta movement per stack (microns) */
+    /** @brief Source cylinder delta movement per stack (microns) [INT32] */
     UA_Int32 Delta_Source = 0;
     
-    /** @brief Sink cylinder delta movement per stack (microns) */
+    /** @brief Sink cylinder delta movement per stack (microns) [INT32] */
     UA_Int32 Delta_Sink = 0;
     
-    /** @brief TRUE when surface preparation is complete */
-    UA_Boolean MakeSurface_Done = UA_FALSE;
+    /** @brief TRUE when layer is prepared and ready for processing [BOOL] */
+    UA_Boolean Layer_Ready = UA_FALSE;
     
-    /** @brief Current source cylinder position (microns from home) */
+    /** @brief Current source cylinder position (microns from home) [INT32] */
     UA_Int32 Marcer_Source_Cylinder_ActualPosition = 0;
     
-    /** @brief Current sink cylinder position (microns from home) */
+    /** @brief Current sink cylinder position (microns from home) [INT32] */
     UA_Int32 Marcer_Sink_Cylinder_ActualPosition = 0;
+    
+    /** @brief TRUE when source cylinder is ready for operation [BOOL] */
+    UA_Boolean Source_Ready = UA_FALSE;
+    
+    /** @brief Surface control mode selector [INT16] */
+    UA_Int16 Surfaces_Control = 0;
+    
+    /** @brief Surface step flag for layer synchronization [BOOL] */
+    UA_Boolean SurfaceStepFlag = UA_FALSE;
+    
+    /** @brief Test flag for surface step functionality [BOOL] */
+    UA_Boolean SurfaceStepFlag_Test = UA_FALSE;
 
     // ========================================================================
-    // GVL (Global Variable List)
+    // StartUpSequence Variables (Actual PLC)
     // ========================================================================
     
-    /** @brief Trigger to start powder surface creation */
-    UA_Boolean StartSurfaces = UA_FALSE;
+    /** @brief Client trigger for startup sequence [BOOL] */
+    UA_Boolean StartUp = UA_FALSE;
     
-    /** @brief Global copy of source cylinder position */
+    /** @brief Server response: startup complete [BOOL] - Server generated */
+    UA_Boolean StartUp_Done = UA_FALSE;
+
+    // ========================================================================
+    // GVL (Global Variable List) - Actual PLC
+    // ========================================================================
+    
+    /** @brief Global variables application object [BOOL] */
+    UA_Boolean GlobalVars = UA_FALSE;
+    
+    /** @brief Acknowledge start for sink cylinder [BOOL] */
+    UA_Boolean Marcer_Sink_Cylinder_AckStart = UA_FALSE;
+    
+    /** @brief Global copy of source cylinder position [INT32] */
     UA_Int32 g_Marcer_Source_Cylinder_ActualPosition = 0;
     
-    /** @brief Global copy of sink cylinder position */
+    /** @brief Global copy of sink cylinder position [INT32] */
     UA_Int32 g_Marcer_Sink_Cylinder_ActualPosition = 0;
 
     // ========================================================================
-    // Prepare2Process Variables
+    // Server-Generated Variables (for client compatibility)
     // ========================================================================
     
-    /** @brief Client request for layer preparation (TRUE=start, FALSE=complete) */
+    /** @brief Client request for layer preparation (TRUE=start, FALSE=complete) [BOOL] */
     UA_Boolean LaySurface = UA_FALSE;
     
-    /** @brief Server response: layer preparation complete */
+    /** @brief Legacy alias for Layer_Ready */
+    UA_Boolean MakeSurface_Done = UA_FALSE;
+    
+    /** @brief Legacy alias for Layer_Ready */
     UA_Boolean LaySurface_Done = UA_FALSE;
     
-    /** @brief Sink cylinder step per layer (microns) */
-    UA_Int32 Step_Sink = 0;
-    
-    /** @brief Source cylinder step per layer (microns) */
-    UA_Int32 Step_Source = 0;
-    
-    /** @brief Number of remaining layers in current build */
-    UA_Int32 Lay_Stacks = 0;
-
-    // ========================================================================
-    // StartUpSequence Variables
-    // ========================================================================
-    
-    /** @brief Client trigger for startup sequence */
-    UA_Boolean StartUp = UA_FALSE;
-    
-    /** @brief Server response: startup complete */
-    UA_Boolean StartUp_Done = UA_FALSE;
+    /** @brief Legacy alias for Surfaces_Control (converted from INT16 to BOOL) */
+    UA_Boolean StartSurfaces = UA_FALSE;
 
     // ========================================================================
     // Internal Server State (not exposed via OPC UA)
@@ -173,11 +192,15 @@ struct PlcState {
         StartUp = UA_FALSE;
         StartSurfaces = UA_FALSE;
         LaySurface = UA_FALSE;
+        Surfaces_Control = 0;
         
         // Clear done flags
         StartUp_Done = UA_FALSE;
         MakeSurface_Done = UA_FALSE;
         LaySurface_Done = UA_FALSE;
+        Layer_Ready = UA_FALSE;
+        Source_Ready = UA_FALSE;
+        SurfaceStepFlag = UA_FALSE;
         
         // Clear internal state
         PreparingLayer = UA_FALSE;

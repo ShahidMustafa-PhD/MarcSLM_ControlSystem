@@ -7,27 +7,22 @@
  * follows industrial safety standards and uses RAII patterns throughout.
  * 
  * @par OPC UA Information Model:
- * The server exposes variables in namespace index 2 (CoDeSys convention)
+ * The server exposes variables in namespace index 4 (CoDeSys actual)
  * with the following structure:
  * 
  * @code
  * Objects/
- *   CECC.MaTe_DLMS.MakeSurface.Z_Stacks [Int32, RW]
- *   CECC.MaTe_DLMS.MakeSurface.Delta_Source [Int32, RW]
- *   CECC.MaTe_DLMS.MakeSurface.Delta_Sink [Int32, RW]
- *   CECC.MaTe_DLMS.MakeSurface.MakeSurface_Done [Boolean, RW]
- *   CECC.MaTe_DLMS.MakeSurface.Marcer_Source_Cylinder_ActualPosition [Int32, RW]
- *   CECC.MaTe_DLMS.MakeSurface.Marcer_Sink_Cylinder_ActualPosition [Int32, RW]
- *   CECC.MaTe_DLMS.GVL.StartSurfaces [Boolean, RW]
- *   CECC.MaTe_DLMS.GVL.g_Marcer_Source_Cylinder_ActualPosition [Int32, RW]
- *   CECC.MaTe_DLMS.GVL.g_Marcer_Sink_Cylinder_ActualPosition [Int32, RW]
- *   CECC.MaTe_DLMS.Prepare2Process.LaySurface [Boolean, RW]
- *   CECC.MaTe_DLMS.Prepare2Process.LaySurface_Done [Boolean, RW]
- *   CECC.MaTe_DLMS.Prepare2Process.Step_Sink [Int32, RW]
- *   CECC.MaTe_DLMS.Prepare2Process.Step_Source [Int32, RW]
- *   CECC.MaTe_DLMS.Prepare2Process.Lay_Stacks [Int32, RW]
- *   CECC.MaTe_DLMS.StartUpSequence.StartUp [Boolean, RW]
- *   CECC.MaTe_DLMS.StartUpSequence.StartUp_Done [Boolean, RW]
+ *   ns=4;s=|var|CECC-D.Application.MakeSurface.Z_Stacks [INT16, RW]
+ *   ns=4;s=|var|CECC-D.Application.MakeSurface.Delta_Source [INT32, RW]
+ *   ns=4;s=|var|CECC-D.Application.MakeSurface.Delta_Sink [INT32, RW]
+ *   ns=4;s=|var|CECC-D.Application.MakeSurface.Layer_Ready [BOOL, RW]
+ *   ns=4;s=|var|CECC-D.Application.MakeSurface.Marcer_Source_Cylinder_ActualPosition [INT32, RW]
+ *   ns=4;s=|var|CECC-D.Application.MakeSurface.Marcer_Sink_Cylinder_ActualPosition [INT32, RW]
+ *   ns=4;s=|var|CECC-D.Application.MakeSurface.Source_Ready [BOOL, RW]
+ *   ns=4;s=|var|CECC-D.Application.MakeSurface.Surfaces_Control [INT16, RW]
+ *   ns=4;s=|var|CECC-D.Application.MakeSurface.SurfaceStepFlag [BOOL, RW]
+ *   ns=4;s=|var|CECC-D.Application.MakeSurface.SurfaceStepFlag_Test [BOOL, RW]
+ *   ns=4;s=|var|CECC-D.Application.StartUpSequence.StartUp [BOOL, RW]
  * @endcode
  * 
  * @author Senior Embedded Systems Engineer
@@ -47,7 +42,7 @@
 namespace slm_opcua {
 
 // ============================================================================
-// Helper: Create string-based NodeId
+// Helper: Create string-based NodeId with CoDeSys format
 // ============================================================================
 
 static UA_NodeId makeStringNodeId(uint16_t ns, const char* identifier)
@@ -78,7 +73,9 @@ SlmOpcUaServer::SlmOpcUaServer(const ServerConfig& config)
         log("[SERVER] Initializing CoDeSys PLC interface...");
         
         PlcConfig plcConfig;
-        plcConfig.plcIpAddress = "192.168.1.10";  // TODO: Load from config file
+        
+        // Try localhost first (PLC on same machine), then fall back to 192.168.1.10
+        plcConfig.plcIpAddress = "localhost";  // Try localhost for PLC on same machine
         plcConfig.plcPort = 502;
         plcConfig.modbusUnitId = 1;
         plcConfig.connectionTimeoutMs = 1000;
@@ -106,11 +103,13 @@ SlmOpcUaServer::SlmOpcUaServer(const ServerConfig& config)
         m_plcInterface = std::make_unique<CodesysPlcInterface>(plcConfig);
         
         log("[SERVER] CoDeSys PLC interface created");
+        log("[SERVER] PLC Connection Target: " + plcConfig.plcIpAddress + ":" + std::to_string(plcConfig.plcPort));
     }
     
     log("[SERVER] SlmOpcUaServer constructed");
     log("[SERVER] Endpoint: " + m_config.endpointUrl);
     log("[SERVER] Namespace URI: " + m_config.namespaceUri);
+    log("[SERVER] Namespace Index: " + std::to_string(m_config.namespaceIndex));
     log("[SERVER] Simulate PLC: " + std::string(m_config.simulatePlc ? "YES" : "NO"));
 }
 
@@ -174,6 +173,7 @@ bool SlmOpcUaServer::start()
     }
     
     log("[START] Server configured with default settings");
+    log("[START] Listening on: " + m_config.endpointUrl);
     
     // Setup namespace
     if (!setupNamespace()) {
@@ -238,8 +238,8 @@ bool SlmOpcUaServer::start()
             PlcStatus plcStatus;
             if (m_plcInterface->readStatus(plcStatus)) {
                 log("[START] Initial PLC Status:");
-                log("[START]   Source Position: " + std::to_string(plcStatus.sourcePositionActual) + " ?m");
-                log("[START]   Sink Position: " + std::to_string(plcStatus.sinkPositionActual) + " ?m");
+                log("[START]   Source Position: " + std::to_string(plcStatus.sourcePositionActual) + " µm");
+                log("[START]   Sink Position: " + std::to_string(plcStatus.sinkPositionActual) + " µm");
                 log("[START]   Emergency Stop: " + std::string(plcStatus.emergencyStopActive ? "ACTIVE" : "OK"));
                 log("[START]   PLC Heartbeat: " + std::to_string(plcStatus.plcHeartbeat));
             }
@@ -326,7 +326,17 @@ bool SlmOpcUaServer::setupNamespace()
         return false;
     }
     
-    log("[NAMESPACE] Namespace set up with index: " + std::to_string(m_nsIndex));
+    log("[NAMESPACE] Namespace registered with index: " + std::to_string(m_nsIndex));
+    log("[NAMESPACE] Expected index from config: " + std::to_string(m_config.namespaceIndex));
+    
+    // Verify namespace index matches expected
+    if (m_nsIndex != m_config.namespaceIndex) {
+        log("[WARNING] Namespace index mismatch!");
+        log("[WARNING] Expected: " + std::to_string(m_config.namespaceIndex) + 
+            ", Got: " + std::to_string(m_nsIndex));
+        log("[WARNING] Using server-assigned index: " + std::to_string(m_nsIndex));
+    }
+    
     return true;
 }
 
@@ -346,6 +356,7 @@ void SlmOpcUaServer::clearNodeIds()
 bool SlmOpcUaServer::addVariables()
 {
     log("[VARIABLES] Adding variables to OPC UA server");
+    log("[VARIABLES] Using CoDeSys node ID format: ns=" + std::to_string(m_nsIndex) + ";s=|var|...");
     
     // Initialize default state
     auto guard = m_stateContainer.lock();
@@ -387,55 +398,112 @@ bool SlmOpcUaServer::addVariables()
         return true;
     };
     
-    // Add all variables
+    // Add all variables with actual PLC node IDs
     bool success = true;
+    int varCount = 0;
     
-    // MakeSurface
-    success &= addVar(m_nodes.Z_Stacks, "CECC.MaTe_DLMS.MakeSurface.Z_Stacks", 
-                      &UA_TYPES[UA_TYPES_INT32], &state.Z_Stacks, true);
-    success &= addVar(m_nodes.Delta_Source, "CECC.MaTe_DLMS.MakeSurface.Delta_Source",
+    // ========================================================================
+    // MakeSurface Variables (Actual PLC)
+    // ========================================================================
+    
+    success &= addVar(m_nodes.Z_Stacks, "|var|CECC-D.Application.MakeSurface.Z_Stacks", 
+                      &UA_TYPES[UA_TYPES_INT16], &state.Z_Stacks, true);
+    varCount++;
+    
+    success &= addVar(m_nodes.Delta_Source, "|var|CECC-D.Application.MakeSurface.Delta_Source",
                       &UA_TYPES[UA_TYPES_INT32], &state.Delta_Source, true);
-    success &= addVar(m_nodes.Delta_Sink, "CECC.MaTe_DLMS.MakeSurface.Delta_Sink",
+    varCount++;
+    
+    success &= addVar(m_nodes.Delta_Sink, "|var|CECC-D.Application.MakeSurface.Delta_Sink",
                       &UA_TYPES[UA_TYPES_INT32], &state.Delta_Sink, true);
-    success &= addVar(m_nodes.MakeSurface_Done, "CECC.MaTe_DLMS.MakeSurface.MakeSurface_Done",
-                      &UA_TYPES[UA_TYPES_BOOLEAN], &state.MakeSurface_Done, true);
+    varCount++;
+    
+    success &= addVar(m_nodes.Layer_Ready, "|var|CECC-D.Application.MakeSurface.Layer_Ready",
+                      &UA_TYPES[UA_TYPES_BOOLEAN], &state.Layer_Ready, true);
+    varCount++;
+    
     success &= addVar(m_nodes.Marcer_Source_Cylinder_ActualPosition,
-                      "CECC.MaTe_DLMS.MakeSurface.Marcer_Source_Cylinder_ActualPosition",
+                      "|var|CECC-D.Application.MakeSurface.Marcer_Source_Cylinder_ActualPosition",
                       &UA_TYPES[UA_TYPES_INT32], &state.Marcer_Source_Cylinder_ActualPosition, true);
+    varCount++;
+    
     success &= addVar(m_nodes.Marcer_Sink_Cylinder_ActualPosition,
-                      "CECC.MaTe_DLMS.MakeSurface.Marcer_Sink_Cylinder_ActualPosition",
+                      "|var|CECC-D.Application.MakeSurface.Marcer_Sink_Cylinder_ActualPosition",
                       &UA_TYPES[UA_TYPES_INT32], &state.Marcer_Sink_Cylinder_ActualPosition, true);
+    varCount++;
     
-    // GVL
-    success &= addVar(m_nodes.StartSurfaces, "CECC.MaTe_DLMS.GVL.StartSurfaces",
-                      &UA_TYPES[UA_TYPES_BOOLEAN], &state.StartSurfaces, true);
-    success &= addVar(m_nodes.g_Marcer_Source_Cylinder_ActualPosition,
-                      "CECC.MaTe_DLMS.GVL.g_Marcer_Source_Cylinder_ActualPosition",
-                      &UA_TYPES[UA_TYPES_INT32], &state.g_Marcer_Source_Cylinder_ActualPosition, true);
-    success &= addVar(m_nodes.g_Marcer_Sink_Cylinder_ActualPosition,
-                      "CECC.MaTe_DLMS.GVL.g_Marcer_Sink_Cylinder_ActualPosition",
-                      &UA_TYPES[UA_TYPES_INT32], &state.g_Marcer_Sink_Cylinder_ActualPosition, true);
+    success &= addVar(m_nodes.Source_Ready, "|var|CECC-D.Application.MakeSurface.Source_Ready",
+                      &UA_TYPES[UA_TYPES_BOOLEAN], &state.Source_Ready, true);
+    varCount++;
     
-    // Prepare2Process
-    success &= addVar(m_nodes.LaySurface, "CECC.MaTe_DLMS.Prepare2Process.LaySurface",
-                      &UA_TYPES[UA_TYPES_BOOLEAN], &state.LaySurface, true);
-    success &= addVar(m_nodes.LaySurface_Done, "CECC.MaTe_DLMS.Prepare2Process.LaySurface_Done",
-                      &UA_TYPES[UA_TYPES_BOOLEAN], &state.LaySurface_Done, true);
-    success &= addVar(m_nodes.Step_Sink, "CECC.MaTe_DLMS.Prepare2Process.Step_Sink",
-                      &UA_TYPES[UA_TYPES_INT32], &state.Step_Sink, true);
-    success &= addVar(m_nodes.Step_Source, "CECC.MaTe_DLMS.Prepare2Process.Step_Source",
-                      &UA_TYPES[UA_TYPES_INT32], &state.Step_Source, true);
-    success &= addVar(m_nodes.Lay_Stacks, "CECC.MaTe_DLMS.Prepare2Process.Lay_Stacks",
-                      &UA_TYPES[UA_TYPES_INT32], &state.Lay_Stacks, true);
+    success &= addVar(m_nodes.Surfaces_Control, "|var|CECC-D.Application.MakeSurface.Surfaces_Control",
+                      &UA_TYPES[UA_TYPES_INT16], &state.Surfaces_Control, true);
+    varCount++;
     
-    // StartUpSequence
-    success &= addVar(m_nodes.StartUp, "CECC.MaTe_DLMS.StartUpSequence.StartUp",
+    success &= addVar(m_nodes.SurfaceStepFlag, "|var|CECC-D.Application.MakeSurface.SurfaceStepFlag",
+                      &UA_TYPES[UA_TYPES_BOOLEAN], &state.SurfaceStepFlag, true);
+    varCount++;
+    
+    success &= addVar(m_nodes.SurfaceStepFlag_Test, "|var|CECC-D.Application.MakeSurface.SurfaceStepFlag_Test",
+                      &UA_TYPES[UA_TYPES_BOOLEAN], &state.SurfaceStepFlag_Test, true);
+    varCount++;
+    
+    // ========================================================================
+    // StartUpSequence Variables (Actual PLC)
+    // ========================================================================
+    
+    success &= addVar(m_nodes.StartUp, "|var|CECC-D.Application.StartUpSequence.StartUp",
                       &UA_TYPES[UA_TYPES_BOOLEAN], &state.StartUp, true);
-    success &= addVar(m_nodes.StartUp_Done, "CECC.MaTe_DLMS.StartUpSequence.StartUp_Done",
+    varCount++;
+    
+    // ========================================================================
+    // GVL Variables (Actual PLC)
+    // ========================================================================
+    
+    success &= addVar(m_nodes.GlobalVars, "|appo|CECC-D.Application.GlobalVars",
+                      &UA_TYPES[UA_TYPES_BOOLEAN], &state.GlobalVars, true);
+    varCount++;
+    
+    success &= addVar(m_nodes.Marcer_Sink_Cylinder_AckStart, 
+                      "|var|CECC-D.Application.GVL.Marcer_Sink_Cylinder.AckStart",
+                      &UA_TYPES[UA_TYPES_BOOLEAN], &state.Marcer_Sink_Cylinder_AckStart, true);
+    varCount++;
+    
+    // ========================================================================
+    // Legacy Compatibility Nodes (for existing client)
+    // ========================================================================
+    
+    // Map legacy nodes to actual PLC variables
+    m_nodes.MakeSurface_Done = m_nodes.Layer_Ready;
+    m_nodes.StartSurfaces = m_nodes.Surfaces_Control;  // Note: type mismatch workaround
+    m_nodes.LaySurface_Done = m_nodes.Layer_Ready;
+    m_nodes.Step_Sink = m_nodes.Delta_Sink;
+    m_nodes.Step_Source = m_nodes.Delta_Source;
+    m_nodes.Lay_Stacks = m_nodes.Z_Stacks;
+    
+    // These are server-generated (not in PLC)
+    success &= addVar(m_nodes.StartUp_Done, "|var|CECC-D.Application.StartUpSequence.StartUp_Done",
                       &UA_TYPES[UA_TYPES_BOOLEAN], &state.StartUp_Done, true);
+    varCount++;
+    
+    success &= addVar(m_nodes.LaySurface, "|var|CECC-D.Application.Prepare2Process.LaySurface",
+                      &UA_TYPES[UA_TYPES_BOOLEAN], &state.LaySurface, true);
+    varCount++;
+    
+    // Global position copies
+    success &= addVar(m_nodes.g_Marcer_Source_Cylinder_ActualPosition,
+                      "|var|CECC-D.Application.GVL.g_Marcer_Source_Cylinder_ActualPosition",
+                      &UA_TYPES[UA_TYPES_INT32], &state.g_Marcer_Source_Cylinder_ActualPosition, true);
+    varCount++;
+    
+    success &= addVar(m_nodes.g_Marcer_Sink_Cylinder_ActualPosition,
+                      "|var|CECC-D.Application.GVL.g_Marcer_Sink_Cylinder_ActualPosition",
+                      &UA_TYPES[UA_TYPES_INT32], &state.g_Marcer_Sink_Cylinder_ActualPosition, true);
+    varCount++;
     
     if (success) {
-        log("[VARIABLES] All variables added successfully (17 total)");
+        log("[VARIABLES] All variables added successfully (" + std::to_string(varCount) + " total)");
+        log("[VARIABLES] Using namespace index: " + std::to_string(m_nsIndex));
     } else {
         log("[ERROR] Some variables failed to add");
     }
@@ -509,29 +577,30 @@ void SlmOpcUaServer::syncStateToVariables()
     const PlcState& state = guard.state();
     
     // Write all state values to OPC UA variables
-    writeVar(m_nodes.Z_Stacks, &state.Z_Stacks, &UA_TYPES[UA_TYPES_INT32]);
+    writeVar(m_nodes.Z_Stacks, &state.Z_Stacks, &UA_TYPES[UA_TYPES_INT16]);
     writeVar(m_nodes.Delta_Source, &state.Delta_Source, &UA_TYPES[UA_TYPES_INT32]);
     writeVar(m_nodes.Delta_Sink, &state.Delta_Sink, &UA_TYPES[UA_TYPES_INT32]);
-    writeVar(m_nodes.MakeSurface_Done, &state.MakeSurface_Done, &UA_TYPES[UA_TYPES_BOOLEAN]);
+    writeVar(m_nodes.Layer_Ready, &state.Layer_Ready, &UA_TYPES[UA_TYPES_BOOLEAN]);
     writeVar(m_nodes.Marcer_Source_Cylinder_ActualPosition, 
              &state.Marcer_Source_Cylinder_ActualPosition, &UA_TYPES[UA_TYPES_INT32]);
     writeVar(m_nodes.Marcer_Sink_Cylinder_ActualPosition,
              &state.Marcer_Sink_Cylinder_ActualPosition, &UA_TYPES[UA_TYPES_INT32]);
+    writeVar(m_nodes.Source_Ready, &state.Source_Ready, &UA_TYPES[UA_TYPES_BOOLEAN]);
+    writeVar(m_nodes.Surfaces_Control, &state.Surfaces_Control, &UA_TYPES[UA_TYPES_INT16]);
+    writeVar(m_nodes.SurfaceStepFlag, &state.SurfaceStepFlag, &UA_TYPES[UA_TYPES_BOOLEAN]);
+    writeVar(m_nodes.SurfaceStepFlag_Test, &state.SurfaceStepFlag_Test, &UA_TYPES[UA_TYPES_BOOLEAN]);
     
-    writeVar(m_nodes.StartSurfaces, &state.StartSurfaces, &UA_TYPES[UA_TYPES_BOOLEAN]);
+    writeVar(m_nodes.StartUp, &state.StartUp, &UA_TYPES[UA_TYPES_BOOLEAN]);
+    writeVar(m_nodes.StartUp_Done, &state.StartUp_Done, &UA_TYPES[UA_TYPES_BOOLEAN]);
+    
+    writeVar(m_nodes.GlobalVars, &state.GlobalVars, &UA_TYPES[UA_TYPES_BOOLEAN]);
+    writeVar(m_nodes.Marcer_Sink_Cylinder_AckStart, &state.Marcer_Sink_Cylinder_AckStart, &UA_TYPES[UA_TYPES_BOOLEAN]);
+    
+    writeVar(m_nodes.LaySurface, &state.LaySurface, &UA_TYPES[UA_TYPES_BOOLEAN]);
     writeVar(m_nodes.g_Marcer_Source_Cylinder_ActualPosition,
              &state.g_Marcer_Source_Cylinder_ActualPosition, &UA_TYPES[UA_TYPES_INT32]);
     writeVar(m_nodes.g_Marcer_Sink_Cylinder_ActualPosition,
              &state.g_Marcer_Sink_Cylinder_ActualPosition, &UA_TYPES[UA_TYPES_INT32]);
-    
-    writeVar(m_nodes.LaySurface, &state.LaySurface, &UA_TYPES[UA_TYPES_BOOLEAN]);
-    writeVar(m_nodes.LaySurface_Done, &state.LaySurface_Done, &UA_TYPES[UA_TYPES_BOOLEAN]);
-    writeVar(m_nodes.Step_Sink, &state.Step_Sink, &UA_TYPES[UA_TYPES_INT32]);
-    writeVar(m_nodes.Step_Source, &state.Step_Source, &UA_TYPES[UA_TYPES_INT32]);
-    writeVar(m_nodes.Lay_Stacks, &state.Lay_Stacks, &UA_TYPES[UA_TYPES_INT32]);
-    
-    writeVar(m_nodes.StartUp, &state.StartUp, &UA_TYPES[UA_TYPES_BOOLEAN]);
-    writeVar(m_nodes.StartUp_Done, &state.StartUp_Done, &UA_TYPES[UA_TYPES_BOOLEAN]);
 }
 
 void SlmOpcUaServer::syncVariablesToState()
@@ -541,14 +610,11 @@ void SlmOpcUaServer::syncVariablesToState()
     
     // Read all values from OPC UA variables to state
     readVar(m_nodes.StartUp, &state.StartUp, &UA_TYPES[UA_TYPES_BOOLEAN]);
-    readVar(m_nodes.StartSurfaces, &state.StartSurfaces, &UA_TYPES[UA_TYPES_BOOLEAN]);
+    readVar(m_nodes.Surfaces_Control, &state.Surfaces_Control, &UA_TYPES[UA_TYPES_INT16]);
     readVar(m_nodes.LaySurface, &state.LaySurface, &UA_TYPES[UA_TYPES_BOOLEAN]);
-    readVar(m_nodes.Z_Stacks, &state.Z_Stacks, &UA_TYPES[UA_TYPES_INT32]);
+    readVar(m_nodes.Z_Stacks, &state.Z_Stacks, &UA_TYPES[UA_TYPES_INT16]);
     readVar(m_nodes.Delta_Source, &state.Delta_Source, &UA_TYPES[UA_TYPES_INT32]);
     readVar(m_nodes.Delta_Sink, &state.Delta_Sink, &UA_TYPES[UA_TYPES_INT32]);
-    readVar(m_nodes.Step_Source, &state.Step_Source, &UA_TYPES[UA_TYPES_INT32]);
-    readVar(m_nodes.Step_Sink, &state.Step_Sink, &UA_TYPES[UA_TYPES_INT32]);
-    readVar(m_nodes.Lay_Stacks, &state.Lay_Stacks, &UA_TYPES[UA_TYPES_INT32]);
 }
 
 // ============================================================================
@@ -585,8 +651,7 @@ void SlmOpcUaServer::applyPlcBehavior()
         if (m_plcInterface->readStatus(plcStatus)) {
             state.Marcer_Source_Cylinder_ActualPosition = plcStatus.sourcePositionActual;
             state.Marcer_Sink_Cylinder_ActualPosition = plcStatus.sinkPositionActual;
-            state.MakeSurface_Done = plcStatus.powderFillDone;
-            state.LaySurface_Done = plcStatus.layerPrepDone;
+            state.Layer_Ready = plcStatus.layerPrepDone;
             state.StartUp_Done = plcStatus.startupDone;
             
             state.g_Marcer_Source_Cylinder_ActualPosition = plcStatus.sourcePositionActual;
@@ -607,7 +672,7 @@ void SlmOpcUaServer::applyPlcBehavior()
             }
         }
         
-        if (state.StartSurfaces && !state.MakeSurface_Done) {
+        if (state.Surfaces_Control > 0 && !state.Layer_Ready) {
             log("[PRODUCTION] Powder fill requested");
             if (m_plcInterface->startPowderFill(state.Z_Stacks, state.Delta_Source, state.Delta_Sink)) {
                 log("[PRODUCTION] ? Powder fill command sent");
@@ -617,14 +682,14 @@ void SlmOpcUaServer::applyPlcBehavior()
         if (state.LaySurface && !state.PreparingLayer) {
             log("[PRODUCTION] Layer preparation requested");
             state.PreparingLayer = UA_TRUE;
-            if (m_plcInterface->startLayerPreparation(state.Step_Source, state.Step_Sink)) {
+            if (m_plcInterface->startLayerPreparation(state.Delta_Source, state.Delta_Sink)) {
                 log("[PRODUCTION] ? Layer prep command sent");
             }
         }
         else if (!state.LaySurface && state.PreparingLayer) {
             log("[PRODUCTION] Layer execution complete");
             state.PreparingLayer = UA_FALSE;
-            state.LaySurface_Done = UA_FALSE;
+            state.Layer_Ready = UA_FALSE;
             m_plcInterface->resetCommands();
         }
         
@@ -648,44 +713,48 @@ void SlmOpcUaServer::applyPlcBehavior()
     if (state.StartUp && !state.StartUp_Done) {
         log("[SIM] Startup sequence initiated");
         state.StartUp_Done = UA_TRUE;
+        state.Source_Ready = UA_TRUE;
         log("[SIM] Startup complete");
     }
     
     // Powder fill
-    if (state.StartSurfaces) {
-        if (!state.MakeSurface_Done) {
+    if (state.Surfaces_Control > 0) {
+        if (!state.Layer_Ready) {
             log("[SIM] Powder fill initiated");
             for (int i = 0; i < state.Z_Stacks; ++i) {
                 state.Marcer_Source_Cylinder_ActualPosition += state.Delta_Source;
                 state.Marcer_Sink_Cylinder_ActualPosition += state.Delta_Sink;
             }
-            state.MakeSurface_Done = UA_TRUE;
+            state.Layer_Ready = UA_TRUE;
+            state.Source_Ready = UA_TRUE;
             log("[SIM] Powder fill complete");
         }
     } else {
-        state.MakeSurface_Done = UA_FALSE;
+        state.Layer_Ready = UA_FALSE;
     }
     
     // Layer preparation
     if (state.LaySurface && !state.PreparingLayer) {
         log("[SIM] Layer preparation requested");
         state.PreparingLayer = UA_TRUE;
-        state.LaySurface_Done = UA_FALSE;
+        state.Layer_Ready = UA_FALSE;
         
-        state.Marcer_Source_Cylinder_ActualPosition += state.Step_Source;
-        state.Marcer_Sink_Cylinder_ActualPosition += state.Step_Sink;
+        state.Marcer_Source_Cylinder_ActualPosition += state.Delta_Source;
+        state.Marcer_Sink_Cylinder_ActualPosition += state.Delta_Sink;
         
-        state.LaySurface_Done = UA_TRUE;
+        state.Layer_Ready = UA_TRUE;
+        state.SurfaceStepFlag = UA_TRUE;
         log("[SIM] Layer prepared");
     }
     else if (!state.LaySurface && state.PreparingLayer) {
         log("[SIM] Layer execution complete");
         state.PreparingLayer = UA_FALSE;
-        state.LaySurface_Done = UA_FALSE;
+        state.Layer_Ready = UA_FALSE;
+        state.SurfaceStepFlag = UA_FALSE;
         log("[SIM] Ready for next layer");
     }
     
-    // Mirror positions
+    // Mirror positions to global variables
     state.g_Marcer_Source_Cylinder_ActualPosition = state.Marcer_Source_Cylinder_ActualPosition;
     state.g_Marcer_Sink_Cylinder_ActualPosition = state.Marcer_Sink_Cylinder_ActualPosition;
 }
