@@ -266,11 +266,11 @@ void OPCServerManagerUA::setupNodeIds() {
     mNode_g_Marcer_Sink_Cylinder_ActualPosition = createNodeId("|var|CECC-D.Application.GVL.g_Marcer_Sink_Cylinder_ActualPosition");
 
     // ========== Prepare2Process nodes ==========
-    mNode_LaySurface = createNodeId("|var|CECC-D.Application.Prepare2Process.LaySurface");
-    mNode_LaySurface_Done = createNodeId("|var|CECC-D.Application.Prepare2Process.LaySurface_Done");
-    mNode_Step_Sink = createNodeId("|var|CECC-D.Application.Prepare2Process.Step_Sink");
-    mNode_Step_Source = createNodeId("|var|CECC-D.Application.Prepare2Process.Step_Source");
-    mNode_Lay_Stacks = createNodeId("|var|CECC-D.Application.Prepare2Process.Lay_Stacks");
+   // mNode_LaySurface = createNodeId("|var|CECC-D.Application.Prepare2Process.LaySurface");
+   // mNode_LaySurface_Done = createNodeId("|var|CECC-D.Application.Prepare2Process.LaySurface_Done");
+   // mNode_Step_Sink = createNodeId("|var|CECC-D.Application.Prepare2Process.Step_Sink");
+   // mNode_Step_Source = createNodeId("|var|CECC-D.Application.Prepare2Process.Step_Source");
+   // mNode_Lay_Stacks = createNodeId("|var|CECC-D.Application.Prepare2Process.Lay_Stacks");
 
     // ========== StartUpSequence nodes ==========
     mNode_StartUp = createNodeId("|var|CECC-D.Application.StartUpSequence.StartUp");
@@ -411,99 +411,124 @@ bool OPCServerManagerUA::readBoolNode(const UA_NodeId& nodeId, bool& value) {
 }
 
 bool OPCServerManagerUA::writeInt32Node(const UA_NodeId& nodeId, int value) {
-    // ========== Stage 1: Validate state and get client pointer ==========
-    UA_Client* client = nullptr;
+
+    // ========== Stage 1: Fast Stack Setup (Zero Heap Allocation) ==========
+    UA_Variant variant;
+    UA_Variant_init(&variant);
+    UA_Int32 val = static_cast<UA_Int32>(value);
+
+    // Notice: setScalar instead of setScalarCopy. 
+    // It safely points to the stack variable 'val'. No UA_Variant_clear needed!
+    UA_Variant_setScalar(&variant, &val, &UA_TYPES[UA_TYPES_INT32]);
+
+    UA_StatusCode status;
+
+    // ========== Stage 2: Thread-Safe Network Call ==========
     {
-        std::scoped_lock lock(mStateMutex);
-        
+        // Lock both mutexes safely to prevent deadlocks and dangling pointers
+        std::scoped_lock lock(mUaCallMutex, mStateMutex);
+
         if (mConnectionLost || !mClient || !mIsInitialized) {
             log("OPC UA not initialized - cannot write Int32 node");
             return false;
         }
-        
-        client = mClient.get();
+
+        status = UA_Client_writeValueAttribute(mClient.get(), nodeId, &variant);
     }
-    
-    // ========== Stage 2: Prepare and send variant without state mutex ==========
-    UA_Variant variant;
-    UA_Variant_init(&variant);
-    UA_Int32 val = static_cast<UA_Int32>(value);
-    UA_Variant_setScalarCopy(&variant, &val, &UA_TYPES[UA_TYPES_INT32]);
-    
-    {
-        std::scoped_lock uaLock(mUaCallMutex);
-        
-        // ========== Write to server ==========
-        UA_StatusCode status = UA_Client_writeValueAttribute(client, nodeId, &variant);
-        
-        // ========== ALWAYS clear variant, even on error ==========
-        UA_Variant_clear(&variant);
-        
-        if (status != UA_STATUSCODE_GOOD) {
-            // ========== Detect connection loss ==========
-            if (status == UA_STATUSCODE_BADCONNECTIONCLOSED ||
-                status == UA_STATUSCODE_BADSESSIONCLOSED) {
-                handleConnectionLoss(QString::fromUtf8(UA_StatusCode_name(status)));
-                return false;
-            }
-            
+    // Locks released.
+
+    // ========== Stage 3: Error Handling ==========
+    if (status != UA_STATUSCODE_GOOD) {
+        if (status == UA_STATUSCODE_BADCONNECTIONCLOSED ||
+            status == UA_STATUSCODE_BADSESSIONCLOSED) {
+            handleConnectionLoss(QString::fromUtf8(UA_StatusCode_name(status)));
+        }
+        else {
             log(QString("ERROR: Failed to write Int32 node: %1")
                 .arg(QString::fromUtf8(UA_StatusCode_name(status))));
-            return false;
         }
+        return false;
     }
-    // mUaCallMutex released here
-    
+
     return true;
 }
+bool OPCServerManagerUA::writeInt16Node(const UA_NodeId& nodeId, int16_t value) {
+    // ========== Fast Stack Setup (Zero Heap Allocation) ==========
+    UA_Variant variant;
+    UA_Variant_init(&variant);
+    UA_Int16 val = static_cast<UA_Int16>(value);
 
-bool OPCServerManagerUA::writeBoolNode(const UA_NodeId& nodeId, bool value) {
-    // ========== Stage 1: Validate state and get client pointer ==========
-    UA_Client* client = nullptr;
+    // Explicitly use INT16 to match the PLC's Z_Stacks definition
+    UA_Variant_setScalar(&variant, &val, &UA_TYPES[UA_TYPES_INT16]);
+
+    UA_StatusCode status;
+
+    // ========== Thread-Safe Network Call ==========
     {
-        std::scoped_lock lock(mStateMutex);
-        
+        std::scoped_lock lock(mUaCallMutex, mStateMutex);
+
+        if (mConnectionLost || !mClient || !mIsInitialized) {
+            log("OPC UA not initialized - cannot write Int16 node");
+            return false;
+        }
+
+        status = UA_Client_writeValueAttribute(mClient.get(), nodeId, &variant);
+    }
+
+    // ========== Error Handling ==========
+    if (status != UA_STATUSCODE_GOOD) {
+        if (status == UA_STATUSCODE_BADCONNECTIONCLOSED ||
+            status == UA_STATUSCODE_BADSESSIONCLOSED) {
+            handleConnectionLoss(QString::fromUtf8(UA_StatusCode_name(status)));
+        }
+        else {
+            log(QString("ERROR: Failed to write Int16 node: %1")
+                .arg(QString::fromUtf8(UA_StatusCode_name(status))));
+        }
+        return false;
+    }
+
+    return true;
+}
+bool OPCServerManagerUA::writeBoolNode(const UA_NodeId& nodeId, bool value) {
+
+    // ========== Stage 1: Fast Stack Setup (Zero Heap Allocation) ==========
+    UA_Variant variant;
+    UA_Variant_init(&variant);
+    UA_Boolean val = value;
+
+    // setScalar points to the stack variable 'val'
+    UA_Variant_setScalar(&variant, &val, &UA_TYPES[UA_TYPES_BOOLEAN]);
+
+    UA_StatusCode status;
+
+    // ========== Stage 2: Thread-Safe Network Call ==========
+    {
+        std::scoped_lock lock(mUaCallMutex, mStateMutex);
+
         if (mConnectionLost || !mClient || !mIsInitialized) {
             log("OPC UA not initialized - cannot write Bool node");
             return false;
         }
-        
-        client = mClient.get();
+
+        status = UA_Client_writeValueAttribute(mClient.get(), nodeId, &variant);
     }
-    
-    // ========== Stage 2: Prepare and send variant without state mutex ==========
-    UA_Variant variant;
-    UA_Variant_init(&variant);
-    UA_Boolean val = value;
-    UA_Variant_setScalarCopy(&variant, &val, &UA_TYPES[UA_TYPES_BOOLEAN]);
-    
-    {
-        std::scoped_lock uaLock(mUaCallMutex);
-        
-        // ========== Write to server ==========
-        UA_StatusCode status = UA_Client_writeValueAttribute(client, nodeId, &variant);
-        
-        // ========== ALWAYS clear variant, even on error ==========
-        UA_Variant_clear(&variant);
-        
-        if (status != UA_STATUSCODE_GOOD) {
-            // ========== Detect connection loss ==========
-            if (status == UA_STATUSCODE_BADCONNECTIONCLOSED ||
-                status == UA_STATUSCODE_BADSESSIONCLOSED) {
-                handleConnectionLoss(QString::fromUtf8(UA_StatusCode_name(status)));
-                return false;
-            }
-            
+
+    // ========== Stage 3: Error Handling ==========
+    if (status != UA_STATUSCODE_GOOD) {
+        if (status == UA_STATUSCODE_BADCONNECTIONCLOSED ||
+            status == UA_STATUSCODE_BADSESSIONCLOSED) {
+            handleConnectionLoss(QString::fromUtf8(UA_StatusCode_name(status)));
+        }
+        else {
             log(QString("ERROR: Failed to write Bool node: %1")
                 .arg(QString::fromUtf8(UA_StatusCode_name(status))));
-            return false;
         }
+        return false;
     }
-    // mUaCallMutex released here
-    
+
     return true;
 }
-
 // ============================================================================
 // Public OPC Operations (Same Interface as OPC DA)
 // ============================================================================
@@ -611,32 +636,32 @@ bool OPCServerManagerUA::writePowderFillParameters(int layers, int deltaSource, 
     // ========== Quick state check ==========
     {
         std::scoped_lock lock(mStateMutex);
-        
+
         if (mConnectionLost || !mIsInitialized) {
             log("ERROR: Required OPC UA nodes not initialized");
             return false;
         }
     }
 
-    // --- Debug: Browse address space ---
-       //if (isInitialized()) {
-          // browseAddressSpace();
-       //}
     // ========== Perform writes outside state mutex ==========
     try {
         QThread::msleep(OPERATION_SLEEP_MS);
 
-        if (!writeInt32Node(mNode_layersMax, layers)) return false;
-        if (!writeInt32Node(mNode_Lay_Stacks, layers)) return false;
+        // 1. Z_Stacks ONLY (Int16)
+        if (!writeInt16Node(mNode_layersMax, static_cast<int16_t>(layers))) return false;
         QThread::msleep(OPERATION_SLEEP_MS);
 
+        // 2. Deltas (Int32)
         if (!writeInt32Node(mNode_delta_Source, deltaSource)) return false;
         QThread::msleep(OPERATION_SLEEP_MS);
-
         if (!writeInt32Node(mNode_delta_Sink, deltaSink)) return false;
         QThread::msleep(OPERATION_SLEEP_MS);
 
-        if (!writeBoolNode(mNode_StartSurfaces, true)) return false;
+        // 3. THE RISING EDGE TRIGGER (Using GVL.StartSurfaces)
+        writeBoolNode(mNode_StartSurfaces, false); // Reset trigger
+        QThread::msleep(100);                      // Wait for PLC scan cycle
+        if (!writeBoolNode(mNode_StartSurfaces, true)) return false; // FIRE!
+
         QThread::msleep(500);
 
         log("Powder fill parameters sent to PLC (OPC UA)");

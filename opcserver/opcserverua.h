@@ -122,14 +122,14 @@ class OPCServerManagerUA : public QObject {
 
 public:
     // ========== Public Constants ==========
-    static constexpr uint16_t DEFAULT_NAMESPACE_INDEX = 2;  // Match server's actual namespace
-    static constexpr const char* DEFAULT_SERVER_URL = "opc.tcp://localhost:4840";
+    static constexpr uint16_t DEFAULT_NAMESPACE_INDEX = 4;  // Match server's actual namespace
+    static constexpr const char* DEFAULT_SERVER_URL = "opc.tcp://192.168.1.10:4840";//"opc.tcp://localhost:4840";
     static constexpr uint32_t CONNECTION_TIMEOUT_MS = 5000;
     static constexpr uint32_t OPERATION_SLEEP_MS = 100;
 
     explicit OPCServerManagerUA(QObject* parent = nullptr);
     ~OPCServerManagerUA();
-
+    
     // Prevent copy semantics (owning unique_ptr)
     OPCServerManagerUA(const OPCServerManagerUA&) = delete;
     OPCServerManagerUA& operator=(const OPCServerManagerUA&) = delete;
@@ -240,6 +240,8 @@ private:
      * Manages UA_Variant lifecycle (init/clear).
      */
     bool writeInt32Node(const UA_NodeId& nodeId, int value);
+
+    bool writeInt16Node(const UA_NodeId& nodeId, int16_t value);
     
     /**
      * Writes a boolean to OPC UA node.
